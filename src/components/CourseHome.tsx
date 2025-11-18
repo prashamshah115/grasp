@@ -1,0 +1,195 @@
+import { ArrowLeft, Book, FileText, Zap, Target, RotateCcw, Layers, BookOpen } from 'lucide-react';
+import { Course } from '../data/courses';
+import { MasteryRing } from './MasteryRing';
+
+interface CourseHomeProps {
+  course: Course;
+  onBack: () => void;
+  onStartPractice: (mode?: any) => void;
+  onViewCheatsheet: () => void;
+  onViewNotes: () => void;
+  masteryMode: 'pass' | 'a-level' | 'deep';
+  onMasteryModeChange: (mode: 'pass' | 'a-level' | 'deep') => void;
+}
+
+export function CourseHome({
+  course,
+  onBack,
+  onStartPractice,
+  onViewCheatsheet,
+  onViewNotes,
+  masteryMode,
+  onMasteryModeChange
+}: CourseHomeProps) {
+  const practiceModesRow1 = [
+    { id: 'quick-recall', icon: Zap, title: 'Quick Recall', desc: 'Instant warmup' },
+    { id: 'weak-spots', icon: Target, title: 'Weak Spots', desc: 'Adaptive practice' },
+    { id: 'exam-problems', icon: FileText, title: 'Exam Problems', desc: 'Past finals' }
+  ];
+
+  const practiceModesRow2 = [
+    { id: 'mistake-replay', icon: RotateCcw, title: 'Mistake Replay', desc: 'Error correction' },
+    { id: 'compression', icon: Layers, title: 'Compression', desc: 'Build cheatsheet' }
+  ];
+
+  return (
+    <div className="min-h-screen bg-white">
+      {/* Header */}
+      <header className="px-8 py-6 border-b border-[#E5E7EB]">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 text-[#6B7280] hover:text-[#111827] transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            <span>Back to Catalog</span>
+          </button>
+          <h1 className="text-xl tracking-tight">grasp.ai</h1>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-6xl mx-auto px-8 py-20">
+        {/* Course Header */}
+        <div className="mb-20">
+          <div className="text-sm text-[#6B7280] mb-3">{course.code}</div>
+          <h1 className="text-6xl mb-4 tracking-tight">{course.title}</h1>
+        </div>
+
+        {/* Finals Readiness Section */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-20">
+          {/* Large Mastery Ring */}
+          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-10 flex flex-col items-center justify-center">
+            <MasteryRing percentage={course.masteryPercentage} size="lg" showLabel label="Finals Readiness" />
+          </div>
+
+          {/* Metrics */}
+          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-10 flex flex-col justify-center">
+            <div className="text-sm text-[#9CA3AF] mb-3">Coverage</div>
+            <div className="text-5xl mb-2">{course.totalTopics}</div>
+            <div className="text-sm text-[#6B7280]">Topics Covered</div>
+          </div>
+
+          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-10 flex flex-col justify-center">
+            <div className="text-sm text-[#9CA3AF] mb-3">Focus Areas</div>
+            <div className="text-5xl mb-2 text-[#EF4444]">{course.weakSpots}</div>
+            <div className="text-sm text-[#6B7280]">Weak Areas</div>
+          </div>
+        </div>
+
+        {/* Mode Selector & Main CTA Section */}
+        <div className="mb-24">
+          <div className="flex items-end justify-between mb-6">
+            <div>
+              <div className="text-sm text-[#9CA3AF] mb-3">Mastery Level</div>
+              <div className="inline-flex gap-2 bg-[#F9FAFB] p-1.5 rounded-[12px]">
+                <button
+                  onClick={() => onMasteryModeChange('pass')}
+                  className={`px-5 py-2.5 rounded-[10px] text-sm transition-all duration-200 ${
+                    masteryMode === 'pass'
+                      ? 'bg-white text-[#111827] shadow-sm'
+                      : 'text-[#6B7280] hover:text-[#111827]'
+                  }`}
+                >
+                  Pass
+                </button>
+                <button
+                  onClick={() => onMasteryModeChange('a-level')}
+                  className={`px-5 py-2.5 rounded-[10px] text-sm transition-all duration-200 ${
+                    masteryMode === 'a-level'
+                      ? 'bg-white text-[#111827] shadow-sm'
+                      : 'text-[#6B7280] hover:text-[#111827]'
+                  }`}
+                >
+                  A-Level
+                </button>
+                <button
+                  onClick={() => onMasteryModeChange('deep')}
+                  className={`px-5 py-2.5 rounded-[10px] text-sm transition-all duration-200 ${
+                    masteryMode === 'deep'
+                      ? 'bg-white text-[#111827] shadow-sm'
+                      : 'text-[#6B7280] hover:text-[#111827]'
+                  }`}
+                >
+                  Deep
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Main CTA */}
+          <button
+            onClick={() => onStartPractice()}
+            className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-8 py-4 rounded-[12px] transition-all duration-200 shadow-sm hover:shadow-md font-medium tracking-tight"
+          >
+            Start Smart Final Practice
+          </button>
+        </div>
+
+        {/* Practice Modes */}
+        <div className="mb-24">
+          <h2 className="text-3xl mb-3">Practice Modes</h2>
+          <p className="text-[#6B7280] mb-10">Choose any mode — enter whenever you need it</p>
+          
+          {/* All modes in single grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {practiceModesRow1.map((mode) => (
+              <button
+                key={mode.id}
+                onClick={() => onStartPractice(mode.id)}
+                className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
+              >
+                <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">
+                  <mode.icon className="w-6 h-6 text-[#4F46E5]" />
+                </div>
+                <h3 className="text-lg mb-2">{mode.title}</h3>
+                <p className="text-sm text-[#6B7280]">{mode.desc}</p>
+              </button>
+            ))}
+            {practiceModesRow2.map((mode) => (
+              <button
+                key={mode.id}
+                onClick={() => onStartPractice(mode.id)}
+                className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
+              >
+                <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">
+                  <mode.icon className="w-6 h-6 text-[#4F46E5]" />
+                </div>
+                <h3 className="text-lg mb-2">{mode.title}</h3>
+                <p className="text-sm text-[#6B7280]">{mode.desc}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Resources */}
+        <div className="mb-12">
+          <h2 className="text-3xl mb-3">Resources</h2>
+          <p className="text-[#6B7280] mb-10">Your study materials</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button
+              onClick={onViewCheatsheet}
+              className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
+            >
+              <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">
+                <Book className="w-6 h-6 text-[#4F46E5]" />
+              </div>
+              <h3 className="text-lg mb-2">Finals Cheatsheet</h3>
+              <p className="text-sm text-[#6B7280]">Your compressed reference</p>
+            </button>
+            <button
+              onClick={onViewNotes}
+              className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
+            >
+              <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">
+                <BookOpen className="w-6 h-6 text-[#4F46E5]" />
+              </div>
+              <h3 className="text-lg mb-2">Notes & Diagrams</h3>
+              <p className="text-sm text-[#6B7280]">Visual summaries</p>
+            </button>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
