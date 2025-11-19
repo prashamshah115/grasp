@@ -1,96 +1,73 @@
 import { useState } from 'react';
 import { LandingPage } from './components/LandingPage';
 import { CourseCatalog } from './components/CourseCatalog';
-import { CourseHome } from './components/CourseHome';
-import { PracticeModeSelector } from './components/PracticeModeSelector';
+import { NavBar } from './components/navigation/NavBar';
+import { SideBar } from './components/navigation/SideBar';
+import { PracticeView } from './components/practice/PracticeView';
+import { CompressionView } from './components/compression/CompressionView';
+import { ExamView } from './components/exam/ExamView';
 import { PracticeSession } from './components/PracticeSession';
-import { Cheatsheet } from './components/Cheatsheet';
-import { NotesViewer } from './components/NotesViewer';
-import { 
-  courses, 
-  cse120Concepts, 
-  warmupQuestions, 
-  examProblems, 
-  mistakeQuestions 
-} from './data/courses';
+import { MultiStepExamSimulation } from './components/exam/MultiStepExamSimulation';
+import { courses } from './data/courses';
+import { multiStepExamQuestions } from './data/multiStepExamQuestions';
 
-type Screen = 
-  | 'landing' 
-  | 'catalog' 
-  | 'course-home' 
-  | 'mode-selector'
-  | 'practice'
-  | 'cheatsheet'
-  | 'notes';
-
-type PracticeMode = 
-  | 'quick-recall' 
-  | 'weak-spots' 
-  | 'exam-problems' 
-  | 'mistake-replay' 
-  | 'compression';
+type Pillar = 'practice' | 'compression' | 'exam';
+type AppState = 'landing' | 'catalog' | 'course' | 'practice-session' | 'exam-session';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<Screen>('landing');
+  const [appState, setAppState] = useState<AppState>('landing');
+  const [currentPillar, setCurrentPillar] = useState<Pillar>('practice');
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
-  const [masteryMode, setMasteryMode] = useState<'pass' | 'a-level' | 'deep'>('a-level');
-  const [currentPracticeMode, setCurrentPracticeMode] = useState<PracticeMode | null>(null);
-  const [userCheatsheet, setUserCheatsheet] = useState(cse120Concepts);
 
   const selectedCourse = courses.find(c => c.id === selectedCourseId);
 
   // Navigation handlers
   const handleStart = () => {
-    setCurrentScreen('catalog');
+    setAppState('catalog');
   };
 
   const handleViewCourse = (courseId: string) => {
     setSelectedCourseId(courseId);
-    setCurrentScreen('course-home');
-  };
-
-  const handleStartPractice = (mode?: PracticeMode) => {
-    if (mode) {
-      setCurrentPracticeMode(mode);
-      setCurrentScreen('practice');
-    } else {
-      setCurrentScreen('mode-selector');
-    }
-  };
-
-  const handleSelectPracticeMode = (mode: PracticeMode) => {
-    setCurrentPracticeMode(mode);
-    setCurrentScreen('practice');
-  };
-
-  const handleBackToCourseHome = () => {
-    setCurrentScreen('course-home');
-    setCurrentPracticeMode(null);
+    setAppState('course');
+    setCurrentPillar('practice'); // Default to practice when entering course
   };
 
   const handleBackToCatalog = () => {
-    setCurrentScreen('catalog');
+    setAppState('catalog');
     setSelectedCourseId(null);
+  };
+
+  const handleSelectCourse = (courseId: string) => {
+    setSelectedCourseId(courseId);
+  };
+
+  const handlePillarChange = (pillar: Pillar) => {
+    setCurrentPillar(pillar);
+  };
+
+  const handleStartPracticeSession = () => {
+    setAppState('practice-session');
+  };
+
+  const handleStartExamSession = () => {
+    setAppState('exam-session');
+  };
+
+  const handleExitSession = () => {
+    setAppState('course');
   };
 
   const handleUploadCourse = () => {
     alert('Upload functionality: Select PDFs, lecture notes, or past exams');
   };
 
-  const handleViewCheatsheet = () => {
-    setCurrentScreen('cheatsheet');
-  };
-
-  const handleViewNotes = () => {
-    setCurrentScreen('notes');
-  };
-
-  // Render current screen
-  if (currentScreen === 'landing') {
+  // Landing Page
+  if (appState === 'landing') {
     return <LandingPage onStart={handleStart} />;
   }
 
-  if (currentScreen === 'catalog') {
+  // Course Catalog
+  if (appState === 'catalog') {
     return (
       <CourseCatalog
         courses={courses}
@@ -100,55 +77,72 @@ export default function App() {
     );
   }
 
-  if (currentScreen === 'course-home' && selectedCourse) {
-    return (
-      <CourseHome
-        course={selectedCourse}
-        onBack={handleBackToCatalog}
-        onStartPractice={handleStartPractice}
-        onViewCheatsheet={handleViewCheatsheet}
-        onViewNotes={handleViewNotes}
-        masteryMode={masteryMode}
-        onMasteryModeChange={setMasteryMode}
-      />
-    );
-  }
-
-  if (currentScreen === 'mode-selector') {
-    return (
-      <PracticeModeSelector
-        onSelectMode={handleSelectPracticeMode}
-        onBack={handleBackToCourseHome}
-      />
-    );
-  }
-
-  if (currentScreen === 'practice' && currentPracticeMode) {
+  // Practice Session (fullscreen)
+  if (appState === 'practice-session' && selectedCourse) {
     return (
       <PracticeSession
-        mode={currentPracticeMode}
-        course={selectedCourse!}
-        onComplete={handleBackToCourseHome}
-        onExit={handleBackToCourseHome}
+        mode="weak-spots"
+        course={selectedCourse}
+        onComplete={handleExitSession}
+        onExit={handleExitSession}
       />
     );
   }
 
-  if (currentScreen === 'cheatsheet') {
+  // Exam Session (fullscreen)
+  if (appState === 'exam-session' && selectedCourse) {
     return (
-      <Cheatsheet
-        concepts={userCheatsheet}
-        onBack={handleBackToCourseHome}
+      <MultiStepExamSimulation
+        examTitle={`${selectedCourse.code} Finals Practice`}
+        durationMinutes={120}
+        questions={multiStepExamQuestions}
+        onComplete={(answers) => {
+          console.log('Exam answers:', answers);
+          alert('Exam complete! Review your answers.');
+          handleExitSession();
+        }}
+        onExit={handleExitSession}
       />
     );
   }
 
-  if (currentScreen === 'notes') {
+  // Course View (3-pillar layout)
+  if (appState === 'course' && selectedCourse) {
     return (
-      <NotesViewer
-        courseId={selectedCourseId!}
-        onBack={handleBackToCourseHome}
-      />
+      <div className="min-h-screen bg-white flex flex-col">
+        {/* Top Navigation */}
+        <NavBar currentPillar={currentPillar} onPillarChange={handlePillarChange} />
+
+        {/* Main Content Area */}
+        <div className="flex flex-1">
+          {/* Left Sidebar */}
+          <SideBar
+            courses={courses}
+            selectedCourseId={selectedCourseId}
+            onSelectCourse={handleSelectCourse}
+            onBackToCatalog={handleBackToCatalog}
+          />
+
+          {/* Content Area */}
+          <>
+            {currentPillar === 'practice' && (
+              <PracticeView
+                course={selectedCourse}
+                onStartSession={handleStartPracticeSession}
+              />
+            )}
+            {currentPillar === 'compression' && (
+              <CompressionView course={selectedCourse} />
+            )}
+            {currentPillar === 'exam' && (
+              <ExamView
+                course={selectedCourse}
+                onStartExam={handleStartExamSession}
+              />
+            )}
+          </>
+        </div>
+      </div>
     );
   }
 
