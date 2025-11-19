@@ -1,0 +1,388 @@
+// AUTO-GENERATED Database Types
+// Run: supabase gen types typescript --project-id YOUR_PROJECT_ID > src/types/database.ts
+// This is a manual version for now - will be replaced by generated types
+
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
+export interface Database {
+  public: {
+    Tables: {
+      courses: {
+        Row: {
+          id: string
+          code: string
+          name: string
+          term: string | null
+        }
+        Insert: {
+          id?: string
+          code: string
+          name: string
+          term?: string | null
+        }
+        Update: {
+          id?: string
+          code?: string
+          name?: string
+          term?: string | null
+        }
+      }
+      topics: {
+        Row: {
+          id: string
+          course_id: string
+          slug: string
+          name: string
+          week: number | null
+          order_index: number
+        }
+        Insert: {
+          id?: string
+          course_id: string
+          slug: string
+          name: string
+          week?: number | null
+          order_index?: number
+        }
+        Update: {
+          id?: string
+          course_id?: string
+          slug?: string
+          name?: string
+          week?: number | null
+          order_index?: number
+        }
+      }
+      documents: {
+        Row: {
+          id: string
+          course_id: string
+          topic_id: string | null
+          doc_type: 'slides' | 'textbook'
+          title: string
+          storage_path: string
+          total_pages: number
+          has_images: boolean
+          layout_type: string | null
+          source_info: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          course_id: string
+          topic_id?: string | null
+          doc_type: 'slides' | 'textbook'
+          title: string
+          storage_path: string
+          total_pages: number
+          has_images?: boolean
+          layout_type?: string | null
+          source_info?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          course_id?: string
+          topic_id?: string | null
+          doc_type?: 'slides' | 'textbook'
+          title?: string
+          storage_path?: string
+          total_pages?: number
+          has_images?: boolean
+          layout_type?: string | null
+          source_info?: Json | null
+          created_at?: string
+        }
+      }
+      document_pages: {
+        Row: {
+          id: string
+          document_id: string
+          page_number: number
+          text_content: string
+          token_count: number | null
+          has_diagrams: boolean
+          has_tables: boolean
+          image_descriptions: Json | null
+          importance_score: number
+          text_embedding: number[] | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          document_id: string
+          page_number: number
+          text_content: string
+          token_count?: number | null
+          has_diagrams?: boolean
+          has_tables?: boolean
+          image_descriptions?: Json | null
+          importance_score?: number
+          text_embedding?: number[] | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          document_id?: string
+          page_number?: number
+          text_content?: string
+          token_count?: number | null
+          has_diagrams?: boolean
+          has_tables?: boolean
+          image_descriptions?: Json | null
+          importance_score?: number
+          text_embedding?: number[] | null
+          created_at?: string
+        }
+      }
+      questions: {
+        Row: {
+          id: string
+          course_id: string
+          topic_id: string
+          q_type: 'mcq' | 'short' | 'long'
+          prompt: string
+          options: Json | null
+          correct_answer: Json
+          explanation: string | null
+          difficulty: 1 | 2 | 3 | null
+          source_ref: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          course_id: string
+          topic_id: string
+          q_type: 'mcq' | 'short' | 'long'
+          prompt: string
+          options?: Json | null
+          correct_answer: Json
+          explanation?: string | null
+          difficulty?: 1 | 2 | 3 | null
+          source_ref?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          course_id?: string
+          topic_id?: string
+          q_type?: 'mcq' | 'short' | 'long'
+          prompt?: string
+          options?: Json | null
+          correct_answer?: Json
+          explanation?: string | null
+          difficulty?: 1 | 2 | 3 | null
+          source_ref?: string | null
+          created_at?: string
+        }
+      }
+      study_sessions: {
+        Row: {
+          id: string
+          user_id: string
+          course_id: string
+          topic_id: string | null
+          exam_id: string | null
+          mode: 'practice' | 'global' | 'compression' | 'exam'
+          started_at: string
+          ended_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          course_id: string
+          topic_id?: string | null
+          exam_id?: string | null
+          mode: 'practice' | 'global' | 'compression' | 'exam'
+          started_at?: string
+          ended_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          course_id?: string
+          topic_id?: string | null
+          exam_id?: string | null
+          mode?: 'practice' | 'global' | 'compression' | 'exam'
+          started_at?: string
+          ended_at?: string | null
+        }
+      }
+      question_attempts: {
+        Row: {
+          id: number
+          session_id: string
+          user_id: string
+          question_id: string
+          is_correct: boolean
+          user_answer: string | null
+          time_taken_sec: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          session_id: string
+          user_id: string
+          question_id: string
+          is_correct: boolean
+          user_answer?: string | null
+          time_taken_sec?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          session_id?: string
+          user_id?: string
+          question_id?: string
+          is_correct?: boolean
+          user_answer?: string | null
+          time_taken_sec?: number | null
+          created_at?: string
+        }
+      }
+      topic_mastery: {
+        Row: {
+          user_id: string
+          topic_id: string
+          num_attempts: number
+          num_correct: number
+          last_practiced_at: string | null
+          mastery_level: 'weak' | 'moderate' | 'strong' | null
+        }
+        Insert: {
+          user_id: string
+          topic_id: string
+          num_attempts?: number
+          num_correct?: number
+          last_practiced_at?: string | null
+          mastery_level?: 'weak' | 'moderate' | 'strong' | null
+        }
+        Update: {
+          user_id?: string
+          topic_id?: string
+          num_attempts?: number
+          num_correct?: number
+          last_practiced_at?: string | null
+          mastery_level?: 'weak' | 'moderate' | 'strong' | null
+        }
+      }
+      compression_notes: {
+        Row: {
+          id: string
+          user_id: string
+          topic_id: string
+          content_md: string
+          source_pages: string[]
+          generated_at: string
+          is_ai_generated: boolean
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          topic_id: string
+          content_md: string
+          source_pages: string[]
+          generated_at?: string
+          is_ai_generated?: boolean
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          topic_id?: string
+          content_md?: string
+          source_pages?: string[]
+          generated_at?: string
+          is_ai_generated?: boolean
+        }
+      }
+      exam_sessions: {
+        Row: {
+          id: string
+          user_id: string
+          exam_id: string
+          started_at: string
+          submitted_at: string | null
+          time_remaining_sec: number | null
+          score: number | null
+          is_completed: boolean
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          exam_id: string
+          started_at?: string
+          submitted_at?: string | null
+          time_remaining_sec?: number | null
+          score?: number | null
+          is_completed?: boolean
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          exam_id?: string
+          started_at?: string
+          submitted_at?: string | null
+          time_remaining_sec?: number | null
+          score?: number | null
+          is_completed?: boolean
+        }
+      }
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      retrieve_pages: {
+        Args: {
+          query_embedding: number[]
+          target_topic_id: string
+          target_user_id: string
+          limit_count: number
+        }
+        Returns: {
+          id: string
+          document_id: string
+          page_number: number
+          text_content: string
+          importance_score: number
+          title: string
+          doc_type: string
+          relevance_score: number
+        }[]
+      }
+      retrieve_chunks: {
+        Args: {
+          query_embedding: number[]
+          page_ids: string[]
+          limit_count: number
+        }
+        Returns: {
+          id: number
+          page_id: string
+          content: string
+          context_tags: string[]
+          page_number: number
+          title: string
+          doc_type: string
+          similarity: number
+        }[]
+      }
+      get_next_spaced_question: {
+        Args: {
+          target_user_id: string
+          target_topic_ids: string[]
+        }
+        Returns: Database['public']['Tables']['questions']['Row'][]
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+  }
+}
