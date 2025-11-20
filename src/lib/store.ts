@@ -1,9 +1,22 @@
 /**
- * Zustand Global State Store
+ * Zustand Global State Store - PHASE 4 CORRECTED
  * Following 2025 best practices with TypeScript + persist middleware
  *
- * Double parentheses syntax: create<State>()()
- * Persist middleware: selective state persistence
+ * CRITICAL: This store ONLY handles CLIENT STATE
+ * Backend data (courses, topics, mastery, etc.) belongs in React Query
+ *
+ * ZUSTAND RESPONSIBILITIES:
+ * ✅ Session-local state (current question index, timer, answers)
+ * ✅ UI state (chat open/closed, loading, errors)
+ * ✅ User auth state (could also use Supabase auth directly)
+ *
+ * REACT QUERY RESPONSIBILITIES:
+ * ❌ Courses, topics, questions
+ * ❌ Mastery data
+ * ❌ Compression notes
+ * ❌ Session data from database
+ *
+ * NO OVERLAP ALLOWED
  */
 
 import { create } from 'zustand'
@@ -14,30 +27,9 @@ import type {
   SessionStats,
   Question
 } from '@/types/session'
-import type { Database } from '@/types/database'
-import type { ChatConversation } from '@/types/chat'
 
-// Screen types
-export type Screen =
-  | 'landing'
-  | 'catalog'
-  | 'course-home'
-  | 'topic-practice'
-  | 'global-practice'
-  | 'compression'
-  | 'exam'
-  | 'chat'
-
-type Course = Database['public']['Tables']['courses']['Row']
-type Topic = Database['public']['Tables']['topics']['Row']
-type TopicMastery = Database['public']['Tables']['topic_mastery']['Row']
-
-// Main app state interface
+// Main app state interface (CLIENT STATE ONLY)
 interface AppState {
-  // ==================== NAVIGATION ====================
-  currentScreen: Screen
-  setScreen: (screen: Screen) => void
-
   // ==================== AUTH ====================
   user: {
     id: string
@@ -46,20 +38,15 @@ interface AppState {
   setUser: (user: AppState['user']) => void
   logout: () => void
 
-  // ==================== COURSE CONTEXT ====================
-  currentCourse: Course | null
-  setCurrentCourse: (course: Course | null) => void
-
-  currentTopic: Topic | null
-  setCurrentTopic: (topic: Topic | null) => void
-
-  // ==================== ACTIVE SESSION ====================
+  // ==================== SESSION-LOCAL STATE ====================
+  // This is ephemeral state for the active session only
   activeSession: StudySession | null
   sessionState: SessionState
-  sessionQuestions: Question[]
+  sessionQuestions: Question[] // Questions for CURRENT session only
   currentQuestionIndex: number
-  userAnswers: Record<string, string>
+  userAnswers: Record<string, string> // Answers for CURRENT session only
   questionStartTime: number | null
+  sessionTimer: number // Elapsed seconds for exam timer
 
   // Session actions
   startSession: (
@@ -74,16 +61,7 @@ interface AppState {
   nextQuestion: () => void
   endSession: (stats: SessionStats) => void
   resetSession: () => void
-
-  // ==================== MASTERY TRACKING ====================
-  topicMastery: Record<string, TopicMastery>
-  setTopicMastery: (topicId: string, mastery: TopicMastery) => void
-  refreshMastery: (courseId: string) => Promise<void>
-
-  // ==================== CHAT ====================
-  activeChat: ChatConversation | null
-  setActiveChat: (chat: ChatConversation | null) => void
-  addChatMessage: (message: Omit<ChatConversation['messages'][0], 'id' | 'timestamp'>) => void
+  updateSessionTimer: (seconds: number) => void
 
   // ==================== UI STATE ====================
   isChatOpen: boolean
@@ -99,35 +77,28 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
-      // ==================== NAVIGATION ====================
-      currentScreen: 'landing',
-      setScreen: (screen) => set({ currentScreen: screen }),
-
       // ==================== AUTH ====================
       user: null,
       setUser: (user) => set({ user }),
       logout: () => set({
         user: null,
-        currentCourse: null,
-        currentTopic: null,
         activeSession: null,
-        topicMastery: {}
+        sessionState: 'idle',
+        sessionQuestions: [],
+        currentQuestionIndex: 0,
+        userAnswers: {},
+        questionStartTime: null,
+        sessionTimer: 0,
       }),
 
-      // ==================== COURSE CONTEXT ====================
-      currentCourse: null,
-      setCurrentCourse: (course) => set({ currentCourse: course }),
-
-      currentTopic: null,
-      setCurrentTopic: (topic) => set({ currentTopic: topic }),
-
-      // ==================== ACTIVE SESSION ====================
+      // ==================== SESSION-LOCAL STATE ====================
       activeSession: null,
       sessionState: 'idle',
       sessionQuestions: [],
       currentQuestionIndex: 0,
       userAnswers: {},
       questionStartTime: null,
+      sessionTimer: 0,
 
       startSession: (mode, courseId, topicId, examId) => {
         const { user } = get()
@@ -158,6 +129,7 @@ export const useAppStore = create<AppState>()(
           currentQuestionIndex: 0,
           userAnswers: {},
           questionStartTime: null,
+          sessionTimer: 0,
         })
       },
 
@@ -183,7 +155,7 @@ export const useAppStore = create<AppState>()(
           questionStartTime: null,
         })
 
-        // TODO: Call API to save attempt
+        // NOTE: API submission is handled by React Query mutation, not Zustand
         console.log(`Answer submitted: ${questionId}, correct: ${isCorrect}, time: ${timeTaken}s`)
       },
 
@@ -211,6 +183,7 @@ export const useAppStore = create<AppState>()(
           currentQuestionIndex: 0,
           userAnswers: {},
           questionStartTime: null,
+          sessionTimer: 0,
         })
 
         // Reset to idle after a delay
@@ -227,47 +200,12 @@ export const useAppStore = create<AppState>()(
           currentQuestionIndex: 0,
           userAnswers: {},
           questionStartTime: null,
+          sessionTimer: 0,
         })
       },
 
-      // ==================== MASTERY TRACKING ====================
-      topicMastery: {},
-      setTopicMastery: (topicId, mastery) => {
-        const { topicMastery } = get()
-        set({
-          topicMastery: {
-            ...topicMastery,
-            [topicId]: mastery,
-          },
-        })
-      },
-
-      refreshMastery: async (courseId) => {
-        // TODO: Implement API call to fetch mastery
-        console.log(`Refreshing mastery for course: ${courseId}`)
-      },
-
-      // ==================== CHAT ====================
-      activeChat: null,
-      setActiveChat: (chat) => set({ activeChat: chat }),
-
-      addChatMessage: (message) => {
-        const { activeChat } = get()
-        if (!activeChat) return
-
-        const newMessage = {
-          ...message,
-          id: crypto.randomUUID(),
-          timestamp: new Date().toISOString(),
-        }
-
-        set({
-          activeChat: {
-            ...activeChat,
-            messages: [...activeChat.messages, newMessage],
-            updatedAt: new Date().toISOString(),
-          },
-        })
+      updateSessionTimer: (seconds) => {
+        set({ sessionTimer: seconds })
       },
 
       // ==================== UI STATE ====================
@@ -283,11 +221,9 @@ export const useAppStore = create<AppState>()(
     {
       name: 'grasp-storage',
       storage: createJSONStorage(() => localStorage),
-      // Only persist user session and course context
+      // Only persist user auth state
       partialize: (state) => ({
         user: state.user,
-        currentCourse: state.currentCourse,
-        currentTopic: state.currentTopic,
       }),
     }
   )

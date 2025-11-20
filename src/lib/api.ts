@@ -294,6 +294,48 @@ export async function endSession(request: EndSessionRequest): Promise<EndSession
 // ==================== EXAMS ====================
 
 /**
+ * ✅ IMPLEMENTED: Fetch all exams for a course
+ */
+export async function fetchExams(courseId: string) {
+  const { data, error } = await supabase
+    .from('exams')
+    .select('*')
+    .eq('course_id', courseId)
+    .order('created_at', { ascending: false })
+
+  if (error) handleSupabaseError(error)
+  return data || []
+}
+
+/**
+ * ✅ IMPLEMENTED: Fetch single exam by ID
+ */
+export async function fetchExam(examId: string) {
+  const { data, error } = await supabase
+    .from('exams')
+    .select('*')
+    .eq('id', examId)
+    .single()
+
+  if (error) handleSupabaseError(error)
+  return data
+}
+
+/**
+ * ✅ IMPLEMENTED: Fetch exam session by ID
+ */
+export async function fetchExamSession(sessionId: string) {
+  const { data, error } = await supabase
+    .from('exam_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .single()
+
+  if (error) handleSupabaseError(error)
+  return data
+}
+
+/**
  * ✅ IMPLEMENTED: Create exam session
  */
 export async function createExamSession(

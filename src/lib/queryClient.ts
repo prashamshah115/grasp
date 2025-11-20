@@ -76,6 +76,7 @@ export const queryKeys = {
   exams: {
     all: ['exams'] as const,
     detail: (id: string) => ['exams', id] as const,
+    byCourse: (courseId: string) => ['exams', 'course', courseId] as const,
     sessions: (examId: string, userId: string) =>
       ['exams', examId, 'sessions', userId] as const,
   },
