@@ -59,6 +59,7 @@
       },
       "scripts": {
             "dev": "vite",
-            "build": "vite build"
+            "build": "vite build",
+            "health-check": "vite-node src/lib/health-check.ts"
       }
 }

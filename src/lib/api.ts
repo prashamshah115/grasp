@@ -584,3 +584,19 @@ export async function ingestDocument(documentId: string) {
     return data
   })
 }
+
+// ==================== RE-EXPORT EXTENSIONS ====================
+// Phase 5: Additional API functions for complete backend coverage
+export {
+  fetchDocuments,
+  fetchDocument,
+  fetchDocumentPages,
+  fetchDocumentPage,
+  fetchUserSessions,
+  fetchSessionDetails,
+  submitExamAnswer,
+  fetchExamAnswers,
+  fetchUserExamSessions,
+  fetchQuestionAttempts,
+  fetchTopicAttempts,
+} from './api-extensions'
