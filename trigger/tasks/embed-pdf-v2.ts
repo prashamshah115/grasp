@@ -1,6 +1,12 @@
 import { task } from "@trigger.dev/sdk/v3";
 import { createClient } from '@supabase/supabase-js';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
+
+const execAsync = promisify(exec);
 
 interface EmbedPDFPayload {
   documentId: string;
@@ -14,18 +20,20 @@ interface PageContent {
   pageNumber: number;
   text: string;
   charCount: number;
+  hasImages: boolean;
+  hasTables: boolean;
 }
 
 /**
  * Trigger.dev v3 Worker: embed-pdf-v2
  *
- * Uses PDF.js for robust PDF parsing
+ * Uses pymupdf4llm (Python) for robust PDF parsing with markdown support
  * Uses bge-base-en-v1.5 (768d) via Jina AI for embeddings
  *
  * Pipeline:
  * 1. Download PDF from signed URL
- * 2. Extract text per page using PDF.js
- * 3. Generate 768d embeddings using bge-base-en-v1.5
+ * 2. Extract text per page using pymupdf4llm (handles diagrams, tables, layout)
+ * 3. Generate 768d embeddings using bge-base-en-v1.5 via Jina AI
  * 4. Chunk text and create chunk embeddings
  * 5. Store in Supabase (document_pages, page_embeddings_v2, page_chunks)
  */
@@ -44,13 +52,15 @@ export const embedPDFv2 = task({
   run: async (payload: EmbedPDFPayload, { ctx }) => {
     const { documentId, pdfUrl, courseId, topicId, userId } = payload;
 
-    console.log(`[embed-pdf-v2] ▶️ Starting job for document ${documentId}`);
+    console.log(`[embed-pdf-v2] ▶️  Starting job for document ${documentId}`);
     const startTime = Date.now();
 
     const supabase = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
+
+    let tempPdfPath: string | null = null;
 
     try {
       // HEALTH CHECK: Verify Supabase connection
@@ -72,63 +82,35 @@ export const embedPDFv2 = task({
       console.log(`[embed-pdf-v2] ⬇️  Downloading PDF...`);
       const downloadStart = Date.now();
 
-      // STEP 2: Download PDF
+      // STEP 2: Download PDF to temp file
       const pdfResponse = await fetch(pdfUrl);
       if (!pdfResponse.ok) {
         throw new Error(`❌ PDF download failed: ${pdfResponse.statusText}`);
       }
 
-      const pdfArrayBuffer = await pdfResponse.arrayBuffer();
-      const pdfBuffer = new Uint8Array(pdfArrayBuffer);
+      const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
+
+      // Save to temp file for pymupdf4llm
+      tempPdfPath = path.join(os.tmpdir(), `${documentId}.pdf`);
+      await fs.writeFile(tempPdfPath, pdfBuffer);
 
       const downloadTime = Date.now() - downloadStart;
       console.log(`[embed-pdf-v2] ✅ Downloaded ${pdfBuffer.length} bytes in ${downloadTime}ms`);
 
-      // STEP 3: Parse PDF using PDF.js
+      // STEP 3: Parse PDF using pymupdf4llm
       await supabase
         .from('documents')
         .update({ processing_step: 'parsing' })
         .eq('id', documentId);
 
-      console.log(`[embed-pdf-v2] 📄 Parsing PDF with PDF.js...`);
+      console.log(`[embed-pdf-v2] 📄 Parsing PDF with pymupdf4llm...`);
       const parseStart = Date.now();
 
-      // Load PDF document
-      const loadingTask = pdfjsLib.getDocument({
-        data: pdfBuffer,
-        useSystemFonts: true,
-        standardFontDataUrl: undefined
-      });
-
-      const pdfDocument = await loadingTask.promise;
-      const totalPages = pdfDocument.numPages;
-
-      console.log(`[embed-pdf-v2] 📊 PDF has ${totalPages} pages`);
-
-      // Extract text from each page
-      const pages: PageContent[] = [];
-      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-        const page = await pdfDocument.getPage(pageNum);
-        const textContent = await page.getTextContent();
-
-        // Combine text items into single string
-        const pageText = textContent.items
-          .map((item: any) => item.str)
-          .join(' ');
-
-        pages.push({
-          pageNumber: pageNum,
-          text: pageText,
-          charCount: pageText.length
-        });
-
-        if (pageNum % 10 === 0) {
-          console.log(`[embed-pdf-v2] 📝 Extracted text from ${pageNum}/${totalPages} pages`);
-        }
-      }
+      // Call Python script to parse PDF
+      const pages = await parsePDFWithPyMuPDF(tempPdfPath);
 
       const parseTime = Date.now() - parseStart;
-      console.log(`[embed-pdf-v2] ✅ Parsed ${totalPages} pages in ${parseTime}ms`);
+      console.log(`[embed-pdf-v2] ✅ Parsed ${pages.length} pages in ${parseTime}ms`);
 
       // STEP 4: Insert document_pages
       await supabase
@@ -150,8 +132,8 @@ export const embedPDFv2 = task({
             page_number: page.pageNumber,
             text_content: page.text,
             token_count: Math.ceil(page.charCount / 4), // Rough token estimate
-            has_diagrams: false, // TODO: detect diagrams
-            has_tables: false, // TODO: detect tables
+            has_diagrams: page.hasImages,
+            has_tables: page.hasTables,
             importance_score: 0.5 // Default importance
           });
       }
@@ -262,7 +244,7 @@ export const embedPDFv2 = task({
       const chunkTime = Date.now() - chunkStart;
       console.log(`[embed-pdf-v2] ✅ Created ${totalChunks} chunks in ${chunkTime}ms`);
 
-      // STEP 7: Mark as complete
+      // STEP 7: Mark as complete and cleanup
       await supabase
         .from('documents')
         .update({
@@ -271,6 +253,11 @@ export const embedPDFv2 = task({
           processed_at: new Date().toISOString()
         })
         .eq('id', documentId);
+
+      // Clean up temp file
+      if (tempPdfPath) {
+        await fs.unlink(tempPdfPath).catch(() => {});
+      }
 
       const totalTime = Date.now() - startTime;
       console.log(`[embed-pdf-v2] 🎉 Document ${documentId} processed successfully in ${totalTime}ms`);
@@ -295,6 +282,11 @@ export const embedPDFv2 = task({
     } catch (error) {
       console.error(`[embed-pdf-v2] ❌ Error processing document ${documentId}:`, error);
 
+      // Clean up temp file
+      if (tempPdfPath) {
+        await fs.unlink(tempPdfPath).catch(() => {});
+      }
+
       // Update document with error
       await supabase
         .from('documents')
@@ -308,6 +300,67 @@ export const embedPDFv2 = task({
     }
   }
 });
+
+/**
+ * Parse PDF using pymupdf4llm (Python library)
+ * Returns structured page content with markdown formatting
+ */
+async function parsePDFWithPyMuPDF(pdfPath: string): Promise<PageContent[]> {
+  // Python script that uses pymupdf4llm
+  const pythonScript = `
+import sys
+import json
+import pymupdf4llm
+
+pdf_path = sys.argv[1]
+
+# Parse PDF to markdown with per-page output
+result = pymupdf4llm.to_markdown(pdf_path, page_chunks=True, write_images=False)
+
+# Extract pages
+pages_data = []
+for page_info in result.get('pages', []):
+    page_num = page_info.get('page_number', 0)
+    text = page_info.get('text', '')
+    metadata = page_info.get('metadata', {})
+
+    pages_data.append({
+        'pageNumber': page_num,
+        'text': text,
+        'charCount': len(text),
+        'hasImages': metadata.get('has_images', False),
+        'hasTables': metadata.get('has_tables', False)
+    })
+
+print(json.dumps(pages_data))
+`;
+
+  // Save Python script to temp file
+  const scriptPath = path.join(os.tmpdir(), `parse_${Date.now()}.py`);
+  await fs.writeFile(scriptPath, pythonScript);
+
+  try {
+    // Execute Python script
+    const { stdout, stderr } = await execAsync(`python3 ${scriptPath} ${pdfPath}`);
+
+    if (stderr && !stderr.includes('Warning')) {
+      console.warn(`[pymupdf4llm] Python warnings: ${stderr}`);
+    }
+
+    const pages: PageContent[] = JSON.parse(stdout);
+
+    // Clean up script
+    await fs.unlink(scriptPath).catch(() => {});
+
+    return pages;
+
+  } catch (error) {
+    // Clean up script
+    await fs.unlink(scriptPath).catch(() => {});
+
+    throw new Error(`❌ pymupdf4llm parsing failed: ${(error as Error).message}`);
+  }
+}
 
 /**
  * Generate embeddings using Jina AI (bge-base-en-v1.5)
