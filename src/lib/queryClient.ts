@@ -85,6 +85,18 @@ export const queryKeys = {
     all: ['chat'] as const,
     conversation: (conversationId: string) => ['chat', conversationId] as const,
   },
+  // Documents & Storage
+  documents: {
+    all: ['documents'] as const,
+    detail: (id: string) => ['documents', id] as const,
+    byTopic: (topicId: string) => ['documents', 'topic', topicId] as const,
+    byCourse: (courseId: string) => ['documents', 'course', courseId] as const,
+  },
+  storage: {
+    all: ['storage'] as const,
+    userFiles: (userId: string) => ['storage', 'user', userId] as const,
+    courseFiles: (coursePath: string) => ['storage', 'course', coursePath] as const,
+  },
 } as const
 
 // Type helpers for query results

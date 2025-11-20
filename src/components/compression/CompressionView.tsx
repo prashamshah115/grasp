@@ -11,18 +11,22 @@
  * - NO mock data, NO props
  */
 
-import { FileText, Sparkles, Upload, Download } from 'lucide-react'
+import { FileText, Sparkles, Upload, Download, FolderOpen } from 'lucide-react'
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useCourse, useTopics, useCompressionNotes, useGenerateCompression } from '@/hooks'
 import { useAppStore } from '@/lib/store'
 import LoadingScreen from '../LoadingScreen'
 import { AIAssistant } from '../shared/AIAssistant'
+import { PDFUploadModal } from './PDFUploadModal'
+import { FileManagement } from '../storage/FileManagement'
 
 export function CompressionView() {
   const { courseId } = useParams<{ courseId: string }>()
   const { user } = useAppStore()
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null)
+  const [uploadModalOpen, setUploadModalOpen] = useState(false)
+  const [showFileManager, setShowFileManager] = useState(false)
 
   // Fetch course and topics
   const { data: course, isLoading: courseLoading } = useCourse(courseId!)
@@ -79,39 +83,57 @@ export function CompressionView() {
               <div className="text-sm text-[#9CA3AF] mb-1">{course.code}</div>
               <h2 className="text-xl font-medium">Topics</h2>
             </div>
-            <button className="p-2 hover:bg-white rounded-[8px] transition-colors">
-              <Upload className="w-4 h-4 text-[#6B7280]" />
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowFileManager(!showFileManager)}
+                className="p-2 hover:bg-white rounded-[8px] transition-colors"
+                title="Manage files"
+              >
+                <FolderOpen className="w-4 h-4 text-[#6B7280]" />
+              </button>
+              <button
+                onClick={() => setUploadModalOpen(true)}
+                disabled={!selectedTopicId}
+                className="p-2 hover:bg-white rounded-[8px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title={selectedTopicId ? "Upload PDF" : "Select a topic first"}
+              >
+                <Upload className="w-4 h-4 text-[#6B7280]" />
+              </button>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            {topics?.map((topic) => {
-              // Check if this topic has notes (simple check - could be more robust)
-              const hasNotes = false // TODO: Add hasNotes logic based on notes query
+          {showFileManager ? (
+            <FileManagement />
+          ) : (
+            <div className="space-y-2">
+              {topics?.map((topic) => {
+                // Check if this topic has notes (simple check - could be more robust)
+                const hasNotes = false // TODO: Add hasNotes logic based on notes query
 
-              return (
-                <button
-                  key={topic.id}
-                  onClick={() => setSelectedTopicId(topic.id)}
-                  className={`w-full text-left p-4 rounded-[12px] transition-all ${
-                    selectedTopicId === topic.id
-                      ? 'bg-white border border-[#10B981] shadow-sm'
-                      : 'bg-white border border-transparent hover:border-[#E5E7EB]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="font-medium">{topic.name}</div>
-                    {hasNotes && (
-                      <div className="w-2 h-2 rounded-full bg-[#10B981]"></div>
-                    )}
-                  </div>
-                  <div className="text-xs text-[#6B7280]">
-                    {hasNotes ? 'Compression ready' : 'No notes yet'}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+                return (
+                  <button
+                    key={topic.id}
+                    onClick={() => setSelectedTopicId(topic.id)}
+                    className={`w-full text-left p-4 rounded-[12px] transition-all ${
+                      selectedTopicId === topic.id
+                        ? 'bg-white border border-[#10B981] shadow-sm'
+                        : 'bg-white border border-transparent hover:border-[#E5E7EB]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="font-medium">{topic.name}</div>
+                      {hasNotes && (
+                        <div className="w-2 h-2 rounded-full bg-[#10B981]"></div>
+                      )}
+                    </div>
+                    <div className="text-xs text-[#6B7280]">
+                      {hasNotes ? 'Compression ready' : 'No notes yet'}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -200,6 +222,16 @@ export function CompressionView() {
           selectedTopic?.name || 'None selected'
         }`}
       />
+
+      {/* Upload Modal */}
+      {selectedTopicId && (
+        <PDFUploadModal
+          isOpen={uploadModalOpen}
+          onClose={() => setUploadModalOpen(false)}
+          courseId={courseId!}
+          topicId={selectedTopicId}
+        />
+      )}
     </div>
   )
 }

@@ -1,15 +1,18 @@
 import { useState } from 'react';
-import { Upload, File, X, CheckCircle } from 'lucide-react';
+import { Upload, File, X, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
+import { useUploadDocument } from '@/hooks';
 
 interface PDFUploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUpload: (files: File[]) => void;
+  courseId: string;
+  topicId: string;
 }
 
-export function PDFUploadModal({ isOpen, onClose, onUpload }: PDFUploadModalProps) {
+export function PDFUploadModal({ isOpen, onClose, courseId, topicId }: PDFUploadModalProps) {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const uploadDocument = useUploadDocument();
 
   if (!isOpen) return null;
 
@@ -45,11 +48,26 @@ export function PDFUploadModal({ isOpen, onClose, onUpload }: PDFUploadModalProp
     setSelectedFiles(selectedFiles.filter((_, i) => i !== index));
   };
 
-  const handleUpload = () => {
-    if (selectedFiles.length > 0) {
-      onUpload(selectedFiles);
+  const handleUpload = async () => {
+    if (selectedFiles.length === 0) return;
+
+    try {
+      // Upload files sequentially (could be parallelized if needed)
+      for (const file of selectedFiles) {
+        await uploadDocument.mutateAsync({
+          file,
+          courseId,
+          topicId,
+          autoIngest: true, // Automatically trigger document processing
+        });
+      }
+
+      // Success - close modal and reset state
       setSelectedFiles([]);
       onClose();
+    } catch (error) {
+      console.error('Upload failed:', error);
+      // Error is handled by the mutation's onError callback
     }
   };
 
@@ -143,21 +161,46 @@ export function PDFUploadModal({ isOpen, onClose, onUpload }: PDFUploadModalProp
             </div>
           )}
 
+          {/* Upload Status */}
+          {uploadDocument.isError && (
+            <div className="mt-4 bg-[#FEE2E2] border border-[#EF4444] rounded-[12px] p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-[#EF4444] flex-shrink-0 mt-0.5" />
+              <div>
+                <h3 className="font-medium text-[#EF4444] mb-1">Upload failed</h3>
+                <p className="text-sm text-[#991B1B]">
+                  {uploadDocument.error instanceof Error
+                    ? uploadDocument.error.message
+                    : 'An error occurred while uploading your files'}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex gap-3 mt-6">
             <button
               onClick={onClose}
-              className="flex-1 px-6 py-3 border border-[#E5E7EB] rounded-[12px] font-medium hover:bg-[#F9FAFB] transition-colors"
+              disabled={uploadDocument.isPending}
+              className="flex-1 px-6 py-3 border border-[#E5E7EB] rounded-[12px] font-medium hover:bg-[#F9FAFB] transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               onClick={handleUpload}
-              disabled={selectedFiles.length === 0}
+              disabled={selectedFiles.length === 0 || uploadDocument.isPending}
               className="flex-1 px-6 py-3 bg-[#10B981] text-white rounded-[12px] font-medium hover:bg-[#059669] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              <CheckCircle className="w-4 h-4" />
-              Generate Compressions
+              {uploadDocument.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4" />
+                  Upload & Process
+                </>
+              )}
             </button>
           </div>
         </div>
