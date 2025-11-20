@@ -582,7 +582,7 @@ export async function uploadDocument(file: File, courseId: string, topicId: stri
  */
 export async function ingestDocument(documentId: string) {
   return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke('ingest-document', {
+    const { data, error } = await supabase.functions.invoke('trigger-ingest', {
       body: { document_id: documentId },
     })
 
