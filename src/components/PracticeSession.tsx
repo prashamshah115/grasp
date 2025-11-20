@@ -1,6 +1,15 @@
+/**
+ * PracticeSession Component - TODO: Integrate with React Query
+ * This is a placeholder component that needs full integration
+ * Currently using Database types instead of mock data
+ */
+
 import { useState } from 'react';
 import { ArrowLeft, ChevronRight, Lightbulb } from 'lucide-react';
-import { Course, warmupQuestions, examProblems, mistakeQuestions, Question } from '../data/courses';
+import type { Database } from '@/types/database';
+
+type Course = Database['public']['Tables']['courses']['Row'];
+type Question = Database['public']['Tables']['questions']['Row'];
 
 interface PracticeSessionProps {
   mode: 'quick-recall' | 'weak-spots' | 'exam-problems' | 'mistake-replay' | 'compression';
@@ -15,21 +24,9 @@ export function PracticeSession({ mode, course, onComplete, onExit }: PracticeSe
   const [showFeedback, setShowFeedback] = useState(false);
   const [showHint, setShowHint] = useState(false);
 
-  // Get questions based on mode
-  const getQuestions = () => {
-    switch (mode) {
-      case 'quick-recall':
-        return warmupQuestions;
-      case 'exam-problems':
-        return examProblems;
-      case 'mistake-replay':
-        return mistakeQuestions;
-      default:
-        return warmupQuestions;
-    }
-  };
-
-  const questions = getQuestions();
+  // TODO: Replace with real questions from React Query
+  // For now, use empty array to allow compilation
+  const questions: Question[] = [];
   const currentQuestion = questions[currentQuestionIndex];
   const totalQuestions = questions.length;
 
