@@ -9,7 +9,7 @@ interface RAGRequest {
   message: string
   topicId?: string
   courseId?: string
-  questionId?: string // Optional: current practice question context
+  questionId?: string // optional: practice question context
 }
 
 interface RAGResponse {
@@ -24,17 +24,18 @@ interface RAGResponse {
   pages: Array<any>
 }
 
-// Helper: Generate BGE embedding via Trigger.dev or direct API
+// ------------------------------------------
+// EMBEDDING HELPER — Trigger.dev BGE 768d
+// ------------------------------------------
 async function generateBGEEmbedding(text: string): Promise<number[]> {
   const triggerUrl = Deno.env.get('TRIGGER_API_URL')
   const triggerKey = Deno.env.get('TRIGGER_SECRET_KEY')
 
   if (!triggerUrl || !triggerKey) {
-    throw new Error('Trigger.dev not configured. Set TRIGGER_API_URL and TRIGGER_SECRET_KEY')
+    throw new Error('Trigger.dev not configured. Missing TRIGGER_API_URL or TRIGGER_SECRET_KEY')
   }
 
   try {
-    // Call Trigger.dev embed-text endpoint
     const response = await fetch(`${triggerUrl}/embed-text`, {
       method: 'POST',
       headers: {
@@ -45,29 +46,29 @@ async function generateBGEEmbedding(text: string): Promise<number[]> {
     })
 
     if (!response.ok) {
-      throw new Error(`Trigger.dev embedding failed: ${response.statusText}`)
+      const err = await response.text()
+      throw new Error(`Trigger.dev embedding failed: ${err}`)
     }
 
     const data = await response.json()
-    return data.embedding // 768d vector from BGE
+    return data.embedding // 768d output
   } catch (error) {
     console.error('[rag-chat] Embedding generation failed:', error)
-    throw new Error('Failed to generate query embedding')
+    throw new Error('Failed to generate BGE embedding')
   }
 }
 
-// Helper: Call OpenAI (or any LLM)
+// ------------------------------------------
+// LLM HELPER — OpenAI GPT-4 Turbo
+// ------------------------------------------
 async function callLLM(systemPrompt: string, userMessage: string): Promise<string> {
-  const openaiKey = Deno.env.get('OPENAI_API_KEY')
-
-  if (!openaiKey) {
-    throw new Error('OPENAI_API_KEY not configured')
-  }
+  const apiKey = Deno.env.get('OPENAI_API_KEY')
+  if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${openaiKey}`,
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -82,23 +83,25 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
   })
 
   if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`OpenAI API error: ${error}`)
+    const err = await response.text()
+    throw new Error(`OpenAI API error: ${err}`)
   }
 
   const data = await response.json()
   return data.choices[0].message.content
 }
 
+// ------------------------------------------
+// MAIN
+// ------------------------------------------
 serve(async (req) => {
   try {
-    // Initialize Supabase client
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Get authenticated user
+    // Auth
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -113,54 +116,61 @@ serve(async (req) => {
     if (authError || !user) {
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
+        { status: 401 }
       )
     }
 
-    const { message, topicId, courseId, questionId } = await req.json() as RAGRequest
+    // Parse request
+    const { message, topicId, courseId, questionId } =
+      await req.json() as RAGRequest
 
     console.log('[rag-chat] Request:', {
       userId: user.id,
       topicId,
       courseId,
       questionId,
-      message: message.substring(0, 100)
+      message: message.substring(0, 80)
     })
 
-    // STEP 1: Generate query embedding using BGE (768d)
+    // ------------------------------------------
+    // STEP 1 — BGE embedding (768d)
+    // ------------------------------------------
     console.log('[rag-chat] Generating BGE embedding...')
     const queryEmbedding = await generateBGEEmbedding(message)
 
-    if (queryEmbedding.length !== 768) {
+    if (queryEmbedding.length !== 768)
       throw new Error(`Invalid embedding dimension: expected 768, got ${queryEmbedding.length}`)
-    }
 
-    // STEP 2: Vector search using RPC (searches page_embeddings_v2 with 768d)
+    // ------------------------------------------
+    // STEP 2 — VECTOR SEARCH (RPC)
+    // ------------------------------------------
     console.log('[rag-chat] Searching documents...')
+
     const { data: pages, error: searchError } = await supabase.rpc(
       'search_document_pages',
       {
         query_embedding: queryEmbedding,
-        filter_course_id: courseId || null,
-        filter_topic_id: topicId || null,
-        filter_user_id: user.id, // Include user's own docs + admin docs
+        filter_course_id: courseId ?? null,
+        filter_topic_id: topicId ?? null,
+        filter_user_id: user.id,
         match_threshold: 0.7,
         match_count: 10
       }
     )
 
     if (searchError) {
-      console.error('[rag-chat] Search error:', searchError)
+      console.error('[rag-chat] Vector search error:', searchError)
       throw searchError
     }
 
-    console.log('[rag-chat] Found', pages?.length || 0, 'matching pages')
+    console.log('[rag-chat] Found', pages?.length || 0, 'pages')
 
-    // STEP 3: Handle no results
+    // No matching pages → fallback message
     if (!pages || pages.length === 0) {
       return new Response(
         JSON.stringify({
-          answer: "I don't have enough context to answer this question. Try uploading relevant course materials first.",
+          answer:
+            "I don't have enough context to answer this yet. Upload course materials or documents for this topic.",
           citations: [],
           pages: []
         } as RAGResponse),
@@ -168,30 +178,42 @@ serve(async (req) => {
       )
     }
 
-    // STEP 4: Build context for LLM
-    const context = pages.map((p, i) =>
-      `[Source ${i + 1}: ${p.doc_title}, Page ${p.page_number} (similarity: ${(p.similarity * 100).toFixed(1)}%)]\n${p.content}`
-    ).join('\n\n---\n\n')
+    // ------------------------------------------
+    // STEP 3 — Build LLM context block
+    // ------------------------------------------
+    const context = pages
+      .map(
+        (p: any, i: number) =>
+          `[Source ${i + 1}: ${p.doc_title}, Page ${p.page_number} (similarity ${(p.similarity * 100).toFixed(1)}%)]\n${p.content}`
+      )
+      .join('\n\n---\n\n')
 
-    // STEP 5: Build system prompt
-    const systemPrompt = `You are GRASP, an AI study tutor for university courses.
+    // ------------------------------------------
+    // STEP 4 — SYSTEM PROMPT
+    // ------------------------------------------
+    const systemPrompt = `You are GRASP, an AI tutor for university-level courses.
 
 RULES:
-1. Answer ONLY using the provided context from course materials
-2. Always cite sources like "[Source 1]" or "[Source 2]"
-3. Be concise (<200 words unless asked for more)
-4. If information is missing, say "Not covered in the provided materials"
-5. Use technical accuracy appropriate for university students
+1. Answer ONLY using the provided course materials.
+2. Cite sources using "[Source 1]" etc.
+3. If context is missing: say "Not covered in the provided materials."
+4. Keep answers concise and technically correct.
+5. NO hallucination.
 
-CONTEXT FROM COURSE MATERIALS:
-${context}`
+CONTEXT:
+${context}
+`
 
-    // STEP 6: Call LLM
-    console.log('[rag-chat] Calling LLM...')
+    // ------------------------------------------
+    // STEP 5 — LLM call
+    // ------------------------------------------
+    console.log('[rag-chat] Calling LLM…')
     const answer = await callLLM(systemPrompt, message)
 
-    // STEP 7: Format citations
-    const citations = pages.map(p => ({
+    // ------------------------------------------
+    // STEP 6 — format citations for UI
+    // ------------------------------------------
+    const citations = pages.map((p: any) => ({
       documentTitle: p.doc_title,
       pageNumber: p.page_number,
       similarity: p.similarity,
@@ -201,27 +223,31 @@ ${context}`
 
     console.log('[rag-chat] Success')
 
+    // ------------------------------------------
+    // RETURN
+    // ------------------------------------------
     return new Response(
       JSON.stringify({
         answer,
         citations,
-        pages: pages.slice(0, 5) // Top 5 for reference
+        pages: pages.slice(0, 5)
       } as RAGResponse),
       {
         status: 200,
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+          'Access-Control-Allow-Headers':
+            'authorization, x-client-info, apikey, content-type'
         }
       }
     )
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[rag-chat] Error:', error)
     return new Response(
       JSON.stringify({
-        error: error instanceof Error ? error.message : 'Internal server error'
+        error: error?.message ?? 'Internal server error'
       }),
       {
         status: 500,

@@ -1,5 +1,5 @@
 // Edge Function: /update-mastery
-// Purpose: Update topic mastery after practice session
+// Purpose: Update topic mastery after a study session
 // Called by: useUpdateMastery hook in frontend
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
@@ -14,7 +14,6 @@ interface UpdateMasteryResponse {
   topicsUpdated: number
 }
 
-// Calculate mastery level based on accuracy
 function calculateMasteryLevel(accuracy: number): 'weak' | 'moderate' | 'strong' {
   if (accuracy < 0.6) return 'weak'
   if (accuracy < 0.8) return 'moderate'
@@ -23,17 +22,18 @@ function calculateMasteryLevel(accuracy: number): 'weak' | 'moderate' | 'strong'
 
 serve(async (req) => {
   try {
-    // Initialize Supabase client
+    // Init Supabase client
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
     const { sessionId } = await req.json() as UpdateMasteryRequest
-
     console.log('[update-mastery] Request:', { sessionId })
 
-    // Get session info
+    // -----------------------------------------------
+    // STEP 1: Fetch session info
+    // -----------------------------------------------
     const { data: session, error: sessionError } = await supabase
       .from('study_sessions')
       .select('user_id, topic_id, course_id')
@@ -45,13 +45,11 @@ serve(async (req) => {
       throw sessionError
     }
 
-    console.log('[update-mastery] Session found:', {
-      userId: session.user_id,
-      topicId: session.topic_id,
-      courseId: session.course_id
-    })
+    console.log('[update-mastery] Session found:', session)
 
-    // Get attempts for this session
+    // -----------------------------------------------
+    // STEP 2: Fetch all attempts in this session
+    // -----------------------------------------------
     const { data: attempts, error: attemptsError } = await supabase
       .from('question_attempts')
       .select('is_correct, question_id, questions!inner(topic_id)')
@@ -70,17 +68,26 @@ serve(async (req) => {
           message: 'No attempts to process',
           topicsUpdated: 0
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers':
+              'authorization, x-client-info, apikey, content-type'
+          }
+        }
       )
     }
 
     console.log('[update-mastery] Processing', attempts.length, 'attempts')
 
-    // Group attempts by topic
+    // -----------------------------------------------
+    // STEP 3: Compute stats per topic
+    // -----------------------------------------------
     const topicStats = new Map<string, { correct: number; total: number }>()
 
     for (const attempt of attempts) {
-      // Use session topic_id if available, otherwise use question's topic_id
       const topicId = session.topic_id || attempt.questions.topic_id
 
       const stats = topicStats.get(topicId) || { correct: 0, total: 0 }
@@ -89,15 +96,20 @@ serve(async (req) => {
       topicStats.set(topicId, stats)
     }
 
-    console.log('[update-mastery] Topic stats:', Array.from(topicStats.entries()).map(([id, stats]) => ({
-      topicId: id,
-      correct: stats.correct,
-      total: stats.total
-    })))
+    console.log(
+      '[update-mastery] Topic stats:',
+      Array.from(topicStats.entries()).map(([id, stats]) => ({
+        topicId: id,
+        correct: stats.correct,
+        total: stats.total
+      }))
+    )
 
-    // Update mastery for each topic
+    // -----------------------------------------------
+    // STEP 4: Write updates to DB
+    // -----------------------------------------------
     for (const [topicId, stats] of topicStats) {
-      // Get existing mastery
+      // Fetch existing mastery record
       const { data: existing } = await supabase
         .from('topic_mastery')
         .select('*')
@@ -107,6 +119,7 @@ serve(async (req) => {
 
       const newAttempts = (existing?.num_attempts || 0) + stats.total
       const newCorrect = (existing?.num_correct || 0) + stats.correct
+
       const accuracy = newCorrect / newAttempts
       const masteryLevel = calculateMasteryLevel(accuracy)
 
@@ -114,7 +127,7 @@ serve(async (req) => {
         topicId,
         newAttempts,
         newCorrect,
-        accuracy: (accuracy * 100).toFixed(1) + '%',
+        accuracy: `${(accuracy * 100).toFixed(1)}%`,
         masteryLevel
       })
 
@@ -126,8 +139,8 @@ serve(async (req) => {
           topic_id: topicId,
           num_attempts: newAttempts,
           num_correct: newCorrect,
-          last_practiced_at: new Date().toISOString(),
-          mastery_level: masteryLevel
+          mastery_level: masteryLevel,
+          last_practiced_at: new Date().toISOString()
         })
 
       if (upsertError) {
@@ -135,10 +148,10 @@ serve(async (req) => {
         throw upsertError
       }
 
-      console.log('[update-mastery] Successfully updated topic', topicId, ':', masteryLevel)
+      console.log('[update-mastery] Updated topic', topicId)
     }
 
-    console.log('[update-mastery] Success, updated', topicStats.size, 'topics')
+    console.log('[update-mastery] Success — topics updated:', topicStats.size)
 
     return new Response(
       JSON.stringify({
@@ -150,16 +163,17 @@ serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+          'Access-Control-Allow-Headers':
+            'authorization, x-client-info, apikey, content-type'
         }
       }
     )
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[update-mastery] Error:', error)
     return new Response(
       JSON.stringify({
-        error: error instanceof Error ? error.message : 'Internal server error'
+        error: error?.message ?? 'Internal server error'
       }),
       {
         status: 500,

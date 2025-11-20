@@ -1,7 +1,12 @@
 import { defineConfig } from "@trigger.dev/sdk/v3";
 
 export default defineConfig({
-  project: "proj_YOUR_PROJECT_ID", // Replace with your Trigger.dev project ID
+  // 🔥 REQUIRED — replace with your actual Trigger.dev project ID
+  project: "proj_YOUR_PROJECT_ID",
+
+  runtime: "node",
+  logLevel: "info",
+
   retries: {
     enabledInDev: true,
     default: {
@@ -12,8 +17,13 @@ export default defineConfig({
       randomize: true,
     },
   },
+
+  // 🔥 Directory for your tasks (Claude is correct)
   dirs: ["./trigger"],
-  // Enable Python extension for BGE model
+
+  // 🔥 Python extension — REQUIRED for:
+  // - pymupdf4llm PDF → markdown
+  // - BGE embeddings (sentence-transformers)
   extensions: [
     {
       name: "python",

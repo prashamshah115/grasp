@@ -1,5 +1,5 @@
 // Edge Function: /update-question-history
-// Purpose: Update spaced repetition state using SM-2 algorithm
+// Purpose: Update spaced repetition history using SM-2-style scheduling
 // Called by: useUpdateQuestionHistory hook in frontend
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
@@ -18,8 +18,7 @@ interface UpdateHistoryResponse {
   accuracy: number
 }
 
-// SM-2 Algorithm for spaced repetition
-// Based on SuperMemo 2 algorithm with exponential backoff
+// SM-2 Variant (simplified): exponential spacing + penalty for wrong answers
 function calculateNextReview(
   timesCorrect: number,
   timesSeen: number,
@@ -28,19 +27,17 @@ function calculateNextReview(
   const now = Date.now()
 
   if (!isCorrect) {
-    // Wrong answer → review in 12 hours
+    // Wrong → review in 12 hours
     return new Date(now + 12 * 60 * 60 * 1000)
   }
 
-  // Correct answer → exponential backoff
-  // Interval = 2^(correct_count) days
+  // Correct → exponential spacing: 2^(correct_count) days
   const newCorrect = timesCorrect + 1
   const intervalDays = Math.pow(2, newCorrect)
 
-  // Cap at 90 days maximum
   const intervalMs = Math.min(
     intervalDays * 24 * 60 * 60 * 1000,
-    90 * 24 * 60 * 60 * 1000
+    90 * 24 * 60 * 60 * 1000 // Max 90 days
   )
 
   return new Date(now + intervalMs)
@@ -48,13 +45,13 @@ function calculateNextReview(
 
 serve(async (req) => {
   try {
-    // Initialize Supabase client
+    // Init Supabase client
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Get authenticated user
+    // Authentication
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -69,7 +66,7 @@ serve(async (req) => {
     if (authError || !user) {
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401 }
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
       )
     }
 
@@ -81,7 +78,9 @@ serve(async (req) => {
       isCorrect
     })
 
-    // Get existing history
+    // ----------------------------------------------------
+    // STEP 1 — Fetch existing history
+    // ----------------------------------------------------
     const { data: existing } = await supabase
       .from('question_history')
       .select('*')
@@ -93,25 +92,33 @@ serve(async (req) => {
     let newTimesCorrect: number
 
     if (!existing) {
-      // First time seeing this question
+      console.log('[update-question-history] First time seeing this question')
       newTimesSeen = 1
       newTimesCorrect = isCorrect ? 1 : 0
-      console.log('[update-question-history] First time seeing this question')
     } else {
       newTimesSeen = existing.times_seen + 1
       newTimesCorrect = existing.times_correct + (isCorrect ? 1 : 0)
+
       console.log('[update-question-history] Updating existing history:', {
         timesSeen: newTimesSeen,
         timesCorrect: newTimesCorrect
       })
     }
 
-    // Calculate next review date using SM-2
-    const nextReview = calculateNextReview(newTimesCorrect, newTimesSeen, isCorrect)
+    // ----------------------------------------------------
+    // STEP 2 — Compute next review time
+    // ----------------------------------------------------
+    const nextReview = calculateNextReview(
+      newTimesCorrect,
+      newTimesSeen,
+      isCorrect
+    )
 
     console.log('[update-question-history] Next review:', nextReview.toISOString())
 
-    // Upsert history
+    // ----------------------------------------------------
+    // STEP 3 — Upsert back into DB
+    // ----------------------------------------------------
     const { error: upsertError } = await supabase
       .from('question_history')
       .upsert({
@@ -128,10 +135,15 @@ serve(async (req) => {
       throw upsertError
     }
 
+    // Accuracy for frontend analytics
     const accuracy = newTimesCorrect / newTimesSeen
+    console.log('[update-question-history] Success:', {
+      accuracy: (accuracy * 100).toFixed(1) + '%'
+    })
 
-    console.log('[update-question-history] Success, accuracy:', (accuracy * 100).toFixed(1) + '%')
-
+    // ----------------------------------------------------
+    // STEP 4 — Response
+    // ----------------------------------------------------
     return new Response(
       JSON.stringify({
         success: true,
@@ -145,16 +157,17 @@ serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+          'Access-Control-Allow-Headers':
+            'authorization, x-client-info, apikey, content-type'
         }
       }
     )
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[update-question-history] Error:', error)
     return new Response(
       JSON.stringify({
-        error: error instanceof Error ? error.message : 'Internal server error'
+        error: error?.message ?? 'Internal server error'
       }),
       {
         status: 500,

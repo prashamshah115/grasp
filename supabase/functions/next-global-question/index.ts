@@ -1,7 +1,3 @@
-// Edge Function: /next-global-question
-// Purpose: Adaptive question selection using spaced repetition (SM-2)
-// Called by: useNextGlobalQuestion hook in frontend
-
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -11,13 +7,13 @@ interface GlobalQuestionRequest {
 
 serve(async (req) => {
   try {
-    // Initialize Supabase client
+    // Init DB
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Get authenticated user
+    // Auth
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(
@@ -37,23 +33,26 @@ serve(async (req) => {
     }
 
     const { courseId } = await req.json() as GlobalQuestionRequest
-
     console.log('[next-global-question] Request:', { userId: user.id, courseId })
 
-    // STEP 1: Find weak topics (mastery < 60%)
+    // STEP 1 — find weak topics
     const { data: weakTopics } = await supabase
       .from('topic_mastery')
       .select('topic_id, num_attempts, num_correct')
       .eq('user_id', user.id)
       .order('last_practiced_at', { ascending: true, nullsFirst: true })
 
-    const weakTopicIds = weakTopics
-      ?.filter(t => t.num_attempts === 0 || (t.num_correct / t.num_attempts) < 0.6)
-      .map(t => t.topic_id) || []
+    const weakTopicIds =
+      weakTopics
+        ?.filter(t =>
+          t.num_attempts === 0 ||
+          (t.num_correct / t.num_attempts) < 0.6
+        )
+        .map(t => t.topic_id) || []
 
     console.log('[next-global-question] Weak topics:', weakTopicIds.length)
 
-    // If no weak topics, get all topics for this course
+    // If no weak topics → fallback to all topics in course
     let targetTopicIds = weakTopicIds
     if (targetTopicIds.length === 0) {
       const { data: allTopics } = await supabase
@@ -70,11 +69,7 @@ serve(async (req) => {
       )
     }
 
-    // STEP 2: Get next question using spaced repetition RPC
-    // Priority:
-    // 1. Due questions (next_review <= now)
-    // 2. Never-seen questions
-    // 3. Questions with low success rate
+    // STEP 2 — try spaced repetition RPC
     const { data: question, error: questionError } = await supabase
       .rpc('get_next_spaced_question', {
         target_user_id: user.id,
@@ -86,9 +81,9 @@ serve(async (req) => {
       throw questionError
     }
 
+    // STEP 3 — fallback: random lowest-difficulty question
     if (!question || question.length === 0) {
-      // Fallback: random question from weak topics
-      console.log('[next-global-question] No spaced question found, using fallback')
+      console.log('[next-global-question] No spaced question, using fallback')
 
       const { data: fallbackQuestion, error: fallbackError } = await supabase
         .from('questions')
@@ -105,7 +100,7 @@ serve(async (req) => {
         )
       }
 
-      console.log('[next-global-question] Using fallback question:', fallbackQuestion.id)
+      console.log('[next-global-question] Using fallback ID:', fallbackQuestion.id)
 
       return new Response(
         JSON.stringify(fallbackQuestion),
@@ -114,13 +109,14 @@ serve(async (req) => {
           headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+            'Access-Control-Allow-Headers':
+              'authorization, x-client-info, apikey, content-type'
           }
         }
       )
     }
 
-    console.log('[next-global-question] Success, question ID:', question[0].id)
+    console.log('[next-global-question] Success, spaced Q ID:', question[0].id)
 
     return new Response(
       JSON.stringify(question[0]),
@@ -129,16 +125,18 @@ serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+          'Access-Control-Allow-Headers':
+            'authorization, x-client-info, apikey, content-type'
         }
       }
     )
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[next-global-question] Error:', error)
+
     return new Response(
       JSON.stringify({
-        error: error instanceof Error ? error.message : 'Internal server error'
+        error: error?.message ?? 'Internal server error'
       }),
       {
         status: 500,
