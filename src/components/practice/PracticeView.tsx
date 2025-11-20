@@ -141,22 +141,20 @@ export function PracticeView() {
               <h4 className="font-medium mb-2">Quick Warmup</h4>
               <p className="text-sm text-[#6B7280]">5 rapid-fire review questions</p>
             </button>
-
+            
             <button className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all group">
               <div className="w-12 h-12 rounded-[12px] bg-[#FEE2E2] flex items-center justify-center mb-4 group-hover:bg-[#FECACA] transition-colors">
                 <Target className="w-6 h-6 text-[#EF4444]" />
               </div>
               <h4 className="font-medium mb-2">Weak Spots Only</h4>
-              <p className="text-sm text-[#6B7280]">
-                Focus on your {weakSpots} weak areas
-              </p>
+              <p className="text-sm text-[#6B7280]">Focus on your {course.weakSpots} weak areas</p>
             </button>
           </div>
         </div>
       </div>
-
+      
       {/* AI Assistant */}
       <AIAssistant context={`Course: ${course.code} - Practice Mode`} />
     </div>
-  )
+  );
 }
