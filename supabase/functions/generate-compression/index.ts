@@ -5,11 +5,21 @@ interface CompressionRequest {
   topicId: string
 }
 
+interface CompressionResponse {
+  success: boolean
+  content: string
+  sourceCount: number
+}
+
+// Helper: Call OpenAI LLM
 async function callLLM(systemPrompt: string, userMessage: string): Promise<string> {
+  const apiKey = Deno.env.get('OPENAI_API_KEY')
+  if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
+
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -22,6 +32,12 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
       max_tokens: 1500
     })
   })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`OpenAI API error: ${error}`)
+  }
+
   const data = await response.json()
   return data.choices[0].message.content
 }
@@ -33,22 +49,28 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const authHeader = req.headers.get('Authorization')!
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Missing Authorization header' }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
     const token = authHeader.replace('Bearer ', '')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
 
     if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401 }
-      )
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
     }
 
     const { topicId } = await req.json() as CompressionRequest
-
     console.log('[generate-compression] Request:', { userId: user.id, topicId })
 
-    // STEP 1: Get all pages for this topic (user's + admin docs)
+    // STEP 1: Grab all document pages for this topic (admin + user docs)
     const { data: pages, error: pagesError } = await supabase
       .from('document_pages')
       .select(`
@@ -57,7 +79,6 @@ serve(async (req) => {
         documents!inner(
           id,
           title,
-          doc_type,
           topic_id,
           owner_user_id
         )
@@ -66,15 +87,9 @@ serve(async (req) => {
       .or(`owner_user_id.is.null,owner_user_id.eq.${user.id}`, { foreignTable: 'documents' })
       .order('documents.id', { ascending: true })
       .order('page_number', { ascending: true })
-      .limit(50) // Max 50 pages for context
+      .limit(50)
 
-    if (pagesError) {
-      console.error('[generate-compression] Pages error:', pagesError)
-      throw pagesError
-    }
-
-    console.log('[generate-compression] Found', pages?.length || 0, 'pages')
-
+    if (pagesError) throw pagesError
     if (!pages || pages.length === 0) {
       return new Response(
         JSON.stringify({
@@ -85,50 +100,58 @@ serve(async (req) => {
       )
     }
 
-    // STEP 2: Get practice questions for context
+    console.log('[generate-compression] Found', pages.length, 'pages')
+
+    // STEP 2: Fetch questions for context
     const { data: questions } = await supabase
       .from('questions')
       .select('prompt')
       .eq('topic_id', topicId)
       .limit(20)
 
-    const questionList = questions?.map(q => `- ${q.prompt}`).join('\n') || 'No questions available.'
+    const questionList =
+      questions?.map((q: any) => `- ${q.prompt}`).join('\n') ||
+      'No questions available.'
 
-    console.log('[generate-compression] Found', questions?.length || 0, 'questions')
+    console.log('[generate-compression] Questions:', questions?.length ?? 0)
 
-    // STEP 3: Aggregate content
-    const content = pages.map((p: any) =>
-      `[${p.documents.title}, p.${p.page_number}]\n${p.content.substring(0, 2000)}`
-    ).join('\n\n---\n\n')
+    // STEP 3: Aggregate & truncate content
+    const content = pages
+      .map((p: any) =>
+        `[${p.documents.title}, p.${p.page_number}]\n${p.content.substring(0, 2000)}`
+      )
+      .join('\n\n---\n\n')
 
-    // STEP 4: Build prompt
-    const systemPrompt = `You are creating ultra-dense exam prep notes for a university course.
+    // STEP 4: Build LLM system prompt
+    const systemPrompt = `
+You are creating ultra-dense, exam-optimized compression notes.
 
-TOPIC QUESTIONS (what students will be tested on):
+TOPIC QUESTIONS:
 ${questionList}
 
 SOURCE MATERIAL:
 ${content}
 
 TASK:
-Generate 10-20 bullet points that:
-1. Answer the question types above
-2. Include key definitions, algorithms, equations
-3. Focus on exam-critical content only
-4. Are dense but clear (each bullet = 1-2 sentences)
+Generate 10–20 bullet points with:
+- Key formulas
+- Core definitions
+- Algorithms
+- Pitfalls
+- Exam-critical facts
 
 FORMAT:
-- Use markdown bullets only
-- No intro/outro text
-- Start directly with content
-- Use **bold** for key terms
-- Use code blocks for algorithms/formulas`
+- Markdown bullets
+- No intro/outro
+- Bold key terms
+- Use code blocks for formulas
+`
 
-    // STEP 5: Generate compression
-    console.log('[generate-compression] Calling LLM...')
-    const compressionContent = await callLLM(systemPrompt, 'Generate the compression notes now.')
+    // STEP 5: Generate via LLM
+    console.log('[generate-compression] Calling LLM…')
+    const compressionContent = await callLLM(systemPrompt, 'Generate the compression notes.')
 
-    // STEP 6: Save to database
+    // STEP 6: Save to DB
     const { error: saveError } = await supabase
       .from('compression_notes')
       .upsert({
@@ -140,10 +163,7 @@ FORMAT:
         is_ai_generated: true
       })
 
-    if (saveError) {
-      console.error('[generate-compression] Save error:', saveError)
-      throw saveError
-    }
+    if (saveError) throw saveError
 
     console.log('[generate-compression] Success')
 
@@ -152,17 +172,23 @@ FORMAT:
         success: true,
         content: compressionContent,
         sourceCount: pages.length
-      }),
+      } as CompressionResponse),
       {
         status: 200,
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+        }
       }
     )
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[generate-compression] Error:', error)
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({
+        error: error?.message ?? 'Internal server error'
+      }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

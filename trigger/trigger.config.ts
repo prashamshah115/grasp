@@ -1,9 +1,12 @@
-import type { TriggerConfig } from "@trigger.dev/sdk/v3";
+import { defineConfig } from "@trigger.dev/sdk/v3";
 
-export const config: TriggerConfig = {
-  project: "proj_YOUR_PROJECT_ID", // Replace with your Trigger.dev project ID
+export default defineConfig({
+  // 🔥 REQUIRED — replace with your actual Trigger.dev project ID
+  project: "proj_YOUR_PROJECT_ID",
+
   runtime: "node",
   logLevel: "info",
+
   retries: {
     enabledInDev: true,
     default: {
@@ -14,5 +17,24 @@ export const config: TriggerConfig = {
       randomize: true,
     },
   },
-  dirs: ["./tasks"],
-};
+
+  // 🔥 Directory for your tasks (Claude is correct)
+  dirs: ["./trigger"],
+
+  // 🔥 Python extension — REQUIRED for:
+  // - pymupdf4llm PDF → markdown
+  // - BGE embeddings (sentence-transformers)
+  extensions: [
+    {
+      name: "python",
+      config: {
+        pythonVersion: "3.11",
+        packages: [
+          "pymupdf4llm",
+          "sentence-transformers",
+          "torch"
+        ]
+      }
+    }
+  ]
+});

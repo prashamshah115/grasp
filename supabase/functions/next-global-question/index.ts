@@ -7,12 +7,21 @@ interface GlobalQuestionRequest {
 
 serve(async (req) => {
   try {
+    // Init DB
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const authHeader = req.headers.get('Authorization')!
+    // Auth
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Missing Authorization header' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
     const token = authHeader.replace('Bearer ', '')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
 
@@ -24,23 +33,26 @@ serve(async (req) => {
     }
 
     const { courseId } = await req.json() as GlobalQuestionRequest
-
     console.log('[next-global-question] Request:', { userId: user.id, courseId })
 
-    // STEP 1: Find weak topics (mastery < 60%)
+    // STEP 1 — find weak topics
     const { data: weakTopics } = await supabase
       .from('topic_mastery')
       .select('topic_id, num_attempts, num_correct')
       .eq('user_id', user.id)
       .order('last_practiced_at', { ascending: true, nullsFirst: true })
 
-    const weakTopicIds = weakTopics
-      ?.filter(t => t.num_attempts === 0 || (t.num_correct / t.num_attempts) < 0.6)
-      .map(t => t.topic_id) || []
+    const weakTopicIds =
+      weakTopics
+        ?.filter(t =>
+          t.num_attempts === 0 ||
+          (t.num_correct / t.num_attempts) < 0.6
+        )
+        .map(t => t.topic_id) || []
 
     console.log('[next-global-question] Weak topics:', weakTopicIds.length)
 
-    // If no weak topics, get all topics for this course
+    // If no weak topics → fallback to all topics in course
     let targetTopicIds = weakTopicIds
     if (targetTopicIds.length === 0) {
       const { data: allTopics } = await supabase
@@ -57,7 +69,7 @@ serve(async (req) => {
       )
     }
 
-    // STEP 2: Get next question using spaced repetition
+    // STEP 2 — try spaced repetition RPC
     const { data: question, error: questionError } = await supabase
       .rpc('get_next_spaced_question', {
         target_user_id: user.id,
@@ -65,49 +77,71 @@ serve(async (req) => {
       })
 
     if (questionError) {
-      console.error('[next-global-question] Error:', questionError)
+      console.error('[next-global-question] RPC error:', questionError)
       throw questionError
     }
 
+    // STEP 3 — fallback: random lowest-difficulty question
     if (!question || question.length === 0) {
-      // Fallback: random question from weak topics
-      const { data: fallbackQuestion } = await supabase
+      console.log('[next-global-question] No spaced question, using fallback')
+
+      const { data: fallbackQuestion, error: fallbackError } = await supabase
         .from('questions')
         .select('*')
         .in('topic_id', targetTopicIds)
+        .order('difficulty', { ascending: true })
         .limit(1)
         .single()
 
-      if (!fallbackQuestion) {
+      if (fallbackError || !fallbackQuestion) {
         return new Response(
           JSON.stringify({ error: 'No questions available' }),
           { status: 404 }
         )
       }
 
-      console.log('[next-global-question] Using fallback question')
+      console.log('[next-global-question] Using fallback ID:', fallbackQuestion.id)
 
       return new Response(
         JSON.stringify(fallbackQuestion),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers':
+              'authorization, x-client-info, apikey, content-type'
+          }
+        }
       )
     }
 
-    console.log('[next-global-question] Success, question ID:', question[0].id)
+    console.log('[next-global-question] Success, spaced Q ID:', question[0].id)
 
     return new Response(
       JSON.stringify(question[0]),
       {
         status: 200,
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers':
+            'authorization, x-client-info, apikey, content-type'
+        }
       }
     )
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[next-global-question] Error:', error)
+
     return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      JSON.stringify({
+        error: error?.message ?? 'Internal server error'
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      }
     )
   }
 })
