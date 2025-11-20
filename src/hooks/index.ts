@@ -34,3 +34,6 @@ export * from './useCompression'
 
 // Global Practice
 export * from './useGlobalPractice'
+
+// Storage & File Upload
+export * from './useStorage'

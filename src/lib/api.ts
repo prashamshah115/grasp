@@ -542,11 +542,17 @@ export async function updateMastery(request: UpdateMasteryRequest): Promise<Upda
 export async function uploadDocument(file: File, courseId: string, topicId: string) {
   const user = await requireAuth()
 
-  const fileName = `${courseId}/${topicId}/${Date.now()}_${file.name}`
+  // Upload to user-content bucket (private, user-scoped)
+  // Path format: {user_id}/courses/{courseId}/{topicId}/{timestamp}_{filename}
+  const fileName = `courses/${courseId}/${topicId}/${Date.now()}_${file.name}`
+  const filePath = `${user.id}/${fileName}`
 
   const { data: uploadData, error: uploadError } = await supabase.storage
-    .from('course-docs')
-    .upload(fileName, file)
+    .from('user-content')
+    .upload(filePath, file, {
+      contentType: 'application/pdf',
+      upsert: false
+    })
 
   if (uploadError) handleSupabaseError(uploadError)
 
