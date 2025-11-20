@@ -1,6 +1,11 @@
 /**
- * CourseLayout Component
- * Layout for course pages with breadcrumbs and course context
+ * CourseLayout Component - PHASE 4 INTEGRATED
+ * Layout for course pages with 3-pillar navigation
+ *
+ * INTEGRATION STATUS: ✅ Complete
+ * - Includes NavBar with Practice/Compression/Exam tabs
+ * - Uses useCourse() hook for course data
+ * - Breadcrumb navigation back to courses
  */
 
 import { Outlet, useParams, Link } from 'react-router-dom'
@@ -9,6 +14,7 @@ import { ChevronLeft } from 'lucide-react'
 import { useCourse } from '@/hooks'
 import LoadingScreen from '../LoadingScreen'
 import { Button } from '../ui/button'
+import { NavBar } from '../navigation/NavBar'
 
 export default function CourseLayout() {
   const { courseId } = useParams<{ courseId: string }>()
@@ -19,8 +25,11 @@ export default function CourseLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Course Header */}
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* 3-Pillar Navigation */}
+      <NavBar />
+
+      {/* Course Header (breadcrumb + course info) */}
       <header className="border-b border-gray-200 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center gap-4">
@@ -43,7 +52,7 @@ export default function CourseLayout() {
       </header>
 
       {/* Course Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 overflow-hidden">
         <Suspense fallback={<LoadingScreen />}>
           <Outlet />
         </Suspense>

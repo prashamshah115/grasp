@@ -416,21 +416,28 @@ export function AIAssistant({ context }: { context: string }) {
 
 ---
 
-## 🗺️ UPDATED ROUTE STRUCTURE
+## 🗺️ UPDATED ROUTE STRUCTURE (CORRECTED)
 
 ```
 /                              → Landing
 /courses                       → Course Catalog
 /course/:courseId              → Course Layout (with NavBar + SideBar)
   ├─ /practice                → PracticeView
-  ├─ /practice/session/:sid   → PracticeSession (active)
   ├─ /compression             → CompressionView
-  └─ /exam-prep               → ExamView (exam list)
-/exam/:examId                  → Exam Simulation (full-screen)
-/exam/:examId/session/:sid     → Resume Exam Session
+  └─ /exam                    → ExamView (exam list - NOT 'exam-prep')
+/session/:sessionId            → Practice Session (GLOBAL - not nested)
+/exam/:examId                  → Exam Instructions (definition page)
+/exam/:examId/start            → Create session & redirect
+/exam-session/:sessionId       → Exam Simulation (full-screen)
 /exam/:examId/results          → Exam Results
 /chat/:topicId?                → Standalone Chat (optional)
 ```
+
+**KEY CORRECTIONS:**
+1. ✅ Changed `/exam-prep` → `/exam` (pillar naming consistency)
+2. ✅ Session route is GLOBAL: `/session/:sessionId` (not `/practice/session/:sid`)
+3. ✅ Exam flow separated: definition (`/exam/:id`) vs session (`/exam-session/:sessionId`)
+4. ✅ Delete mock data ONLY AFTER hooks are verified working
 
 ---
 
@@ -472,49 +479,63 @@ const masteryPercentage = calculateMasteryPercentage(mastery)
 
 ---
 
-## 🚨 CRITICAL DECISIONS NEEDED FROM YOU
+## ✅ CRITICAL DECISIONS (APPROVED)
 
-### 1. Route Structure - Confirm this is correct:
+### 1. Route Structure ✅ APPROVED:
 
 ```
 /course/:courseId/practice      ← Practice pillar
 /course/:courseId/compression   ← Compression pillar
-/course/:courseId/exam-prep     ← Exam pillar (list of exams)
+/course/:courseId/exam          ← Exam pillar (NOT 'exam-prep')
 ```
-
-**Is this correct? Or different naming?**
 
 ---
 
-### 2. Session Flow - Confirm this flow:
+### 2. Session Flow ✅ APPROVED (CORRECTED):
 
 **Practice:**
 1. Click "Start Session" on PracticeView
-2. Navigate to `/course/:courseId/practice/session/:sessionId`
-3. Show questions one by one
-4. On complete, navigate back to PracticeView
-
-**Is this correct?**
+2. Create session via `useStartSession()` mutation
+3. Navigate to `/session/:sessionId` (GLOBAL route, not nested)
+4. Show questions one by one
+5. On complete, navigate back to `/course/:courseId/practice`
 
 ---
 
-### 3. Exam Flow - Confirm this flow:
+### 3. Exam Flow ✅ APPROVED (CORRECTED):
 
 **Exam:**
-1. Click exam from ExamView
-2. Navigate to `/exam/:examId` (full-screen)
-3. Create session automatically
-4. On submit, navigate to `/exam/:examId/results`
+1. Click exam from ExamView → Navigate to `/exam/:examId`
+2. User sees instructions, clicks "Start Exam"
+3. Navigate to `/exam/:examId/start` (loader creates session)
+4. Redirect to `/exam-session/:sessionId` (full-screen)
+5. On submit, navigate to `/exam/:examId/results`
 
-**Is this correct?**
+**KEY: Exam definition ≠ Exam session**
 
 ---
 
-### 4. Data Migration - Confirm:
+### 4. State Management Split ✅ APPROVED:
 
-**Should I:**
-- ✅ Delete mock data files (`src/data/courses.ts`, `examQuestions.ts`)?
-- ✅ Or keep them for fallback/demo mode?
+**Zustand (client state ONLY):**
+- Current screen/UI state
+- Session-local state (current question index, timer)
+- User preferences
+
+**React Query (backend data ONLY):**
+- Courses, topics, questions
+- Mastery data
+- Compression notes
+- Session data from database
+
+**NO OVERLAP ALLOWED**
+
+---
+
+### 5. Data Migration ✅ APPROVED:
+
+- ✅ Delete mock data files AFTER React Query hooks verified
+- ✅ Delete: `src/data/courses.ts`, `examQuestions.ts`, `multiStepExamQuestions.ts`
 
 ---
 
@@ -535,18 +556,16 @@ const masteryPercentage = calculateMasteryPercentage(mastery)
 
 ---
 
-## ❓ QUESTIONS FOR YOU
+## ✅ APPROVAL STATUS
 
-1. **Route structure OK?** (practice/compression/exam-prep)
-2. **Session flow OK?** (navigate to session route on start)
-3. **Exam flow OK?** (full-screen, auto-create session)
-4. **Delete mock data?** (yes/no)
-5. **Any other requirements or concerns?**
+**ALL QUESTIONS RESOLVED AND APPROVED:**
+
+1. ✅ Route structure: `/practice`, `/compression`, `/exam` (NOT `/exam-prep`)
+2. ✅ Session flow: Global `/session/:sessionId` route (NOT nested)
+3. ✅ Exam flow: Separate definition page from session (`/exam-session/:sessionId`)
+4. ✅ Mock data: Delete AFTER hooks verified
+5. ✅ State split: Zustand (UI) vs React Query (backend) - NO OVERLAP
 
 ---
 
-**REPLY WITH:**
-- ✅ "Approved, proceed" if everything looks good
-- ❓ Specific changes/questions if you need adjustments
-
-**I will not write any code until you approve this plan.**
+**PROCEEDING WITH IMPLEMENTATION**
