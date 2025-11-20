@@ -1,26 +1,77 @@
+/**
+ * CourseHome Component - PHASE 4 INTEGRATED
+ * Course overview page (default route for /course/:courseId)
+ *
+ * INTEGRATION STATUS: ✅ Complete
+ * - Uses useParams() to get courseId from URL
+ * - Uses useCourse() hook for course data (React Query)
+ * - Uses useTopics() hook for topic count
+ * - Uses useCourseMastery() hook for mastery stats
+ * - Uses useNavigate() for navigation
+ * - NO props, NO mock data
+ */
+
 import { ArrowLeft, Book, FileText, Zap, Target, RotateCcw, Layers, BookOpen } from 'lucide-react';
-import { Course } from '../data/courses';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { useCourse, useTopics, useCourseMastery } from '@/hooks';
+import { useAppStore } from '@/lib/store';
 import { MasteryRing } from './MasteryRing';
+import LoadingScreen from './LoadingScreen';
 
-interface CourseHomeProps {
-  course: Course;
-  onBack: () => void;
-  onStartPractice: (mode?: any) => void;
-  onViewCheatsheet: () => void;
-  onViewNotes: () => void;
-  masteryMode: 'pass' | 'a-level' | 'deep';
-  onMasteryModeChange: (mode: 'pass' | 'a-level' | 'deep') => void;
-}
+export function CourseHome() {
+  const { courseId } = useParams<{ courseId: string }>();
+  const navigate = useNavigate();
+  const { user } = useAppStore();
+  const [masteryMode, setMasteryMode] = useState<'pass' | 'a-level' | 'deep'>('a-level');
 
-export function CourseHome({
-  course,
-  onBack,
-  onStartPractice,
-  onViewCheatsheet,
-  onViewNotes,
-  masteryMode,
-  onMasteryModeChange
-}: CourseHomeProps) {
+  // Fetch course data
+  const { data: course, isLoading: courseLoading } = useCourse(courseId!);
+  const { data: topics, isLoading: topicsLoading } = useTopics(courseId!);
+  const { data: mastery, isLoading: masteryLoading } = useCourseMastery(
+    user?.id || '',
+    courseId!
+  );
+
+  const isLoading = courseLoading || topicsLoading || masteryLoading;
+
+  if (isLoading) {
+    return <LoadingScreen message="Loading course..." />;
+  }
+
+  if (!course) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p>Course not found</p>
+      </div>
+    );
+  }
+
+  // Calculate mastery percentage
+  const totalAttempts = mastery?.reduce((sum, m) => sum + m.num_attempts, 0) || 0;
+  const correctAttempts = mastery?.reduce((sum, m) => sum + m.num_correct, 0) || 0;
+  const masteryPercentage = totalAttempts > 0 ? Math.round((correctAttempts / totalAttempts) * 100) : 0;
+
+  // Count weak spots
+  const weakSpots = mastery?.filter(m => m.mastery_level === 'weak').length || 0;
+  const totalTopics = topics?.length || 0;
+
+  const handleBack = () => {
+    navigate('/courses');
+  };
+
+  const handleStartPractice = (mode?: string) => {
+    // Navigate to practice pillar - the practice view will handle mode selection
+    navigate(`/course/${courseId}/practice`);
+  };
+
+  const handleViewCheatsheet = () => {
+    navigate(`/course/${courseId}/compression`);
+  };
+
+  const handleViewNotes = () => {
+    navigate(`/course/${courseId}/compression`);
+  };
   const practiceModesRow1 = [
     { id: 'quick-recall', icon: Zap, title: 'Quick Recall', desc: 'Instant warmup' },
     { id: 'weak-spots', icon: Target, title: 'Weak Spots', desc: 'Adaptive practice' },
@@ -38,7 +89,7 @@ export function CourseHome({
       <header className="px-8 py-6 border-b border-[#E5E7EB]">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <button
-            onClick={onBack}
+            onClick={handleBack}
             className="flex items-center gap-2 text-[#6B7280] hover:text-[#111827] transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -53,26 +104,29 @@ export function CourseHome({
         {/* Course Header */}
         <div className="mb-20">
           <div className="text-sm text-[#6B7280] mb-3">{course.code}</div>
-          <h1 className="text-6xl mb-4 tracking-tight">{course.title}</h1>
+          <h1 className="text-6xl mb-4 tracking-tight">{course.name}</h1>
+          {course.term && (
+            <div className="text-sm text-[#9CA3AF]">{course.term}</div>
+          )}
         </div>
 
         {/* Finals Readiness Section */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-20">
           {/* Large Mastery Ring */}
           <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-10 flex flex-col items-center justify-center">
-            <MasteryRing percentage={course.masteryPercentage} size="lg" showLabel label="Finals Readiness" />
+            <MasteryRing percentage={masteryPercentage} size="lg" showLabel label="Finals Readiness" />
           </div>
 
           {/* Metrics */}
           <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-10 flex flex-col justify-center">
             <div className="text-sm text-[#9CA3AF] mb-3">Coverage</div>
-            <div className="text-5xl mb-2">{course.totalTopics}</div>
+            <div className="text-5xl mb-2">{totalTopics}</div>
             <div className="text-sm text-[#6B7280]">Topics Covered</div>
           </div>
 
           <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-10 flex flex-col justify-center">
             <div className="text-sm text-[#9CA3AF] mb-3">Focus Areas</div>
-            <div className="text-5xl mb-2 text-[#EF4444]">{course.weakSpots}</div>
+            <div className="text-5xl mb-2 text-[#EF4444]">{weakSpots}</div>
             <div className="text-sm text-[#6B7280]">Weak Areas</div>
           </div>
         </div>
@@ -84,7 +138,7 @@ export function CourseHome({
               <div className="text-sm text-[#9CA3AF] mb-3">Mastery Level</div>
               <div className="inline-flex gap-2 bg-[#F9FAFB] p-1.5 rounded-[12px]">
                 <button
-                  onClick={() => onMasteryModeChange('pass')}
+                  onClick={() => setMasteryMode('pass')}
                   className={`px-5 py-2.5 rounded-[10px] text-sm transition-all duration-200 ${
                     masteryMode === 'pass'
                       ? 'bg-white text-[#111827] shadow-sm'
@@ -94,7 +148,7 @@ export function CourseHome({
                   Pass
                 </button>
                 <button
-                  onClick={() => onMasteryModeChange('a-level')}
+                  onClick={() => setMasteryMode('a-level')}
                   className={`px-5 py-2.5 rounded-[10px] text-sm transition-all duration-200 ${
                     masteryMode === 'a-level'
                       ? 'bg-white text-[#111827] shadow-sm'
@@ -104,7 +158,7 @@ export function CourseHome({
                   A-Level
                 </button>
                 <button
-                  onClick={() => onMasteryModeChange('deep')}
+                  onClick={() => setMasteryMode('deep')}
                   className={`px-5 py-2.5 rounded-[10px] text-sm transition-all duration-200 ${
                     masteryMode === 'deep'
                       ? 'bg-white text-[#111827] shadow-sm'
@@ -119,7 +173,7 @@ export function CourseHome({
 
           {/* Main CTA */}
           <button
-            onClick={() => onStartPractice()}
+            onClick={() => handleStartPractice()}
             className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-8 py-4 rounded-[12px] transition-all duration-200 shadow-sm hover:shadow-md font-medium tracking-tight"
           >
             Start Smart Final Practice
@@ -136,7 +190,7 @@ export function CourseHome({
             {practiceModesRow1.map((mode) => (
               <button
                 key={mode.id}
-                onClick={() => onStartPractice(mode.id)}
+                onClick={() => handleStartPractice(mode.id)}
                 className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
               >
                 <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">
@@ -149,7 +203,7 @@ export function CourseHome({
             {practiceModesRow2.map((mode) => (
               <button
                 key={mode.id}
-                onClick={() => onStartPractice(mode.id)}
+                onClick={() => handleStartPractice(mode.id)}
                 className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
               >
                 <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">
@@ -168,7 +222,7 @@ export function CourseHome({
           <p className="text-[#6B7280] mb-10">Your study materials</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <button
-              onClick={onViewCheatsheet}
+              onClick={handleViewCheatsheet}
               className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
             >
               <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">
@@ -178,7 +232,7 @@ export function CourseHome({
               <p className="text-sm text-[#6B7280]">Your compressed reference</p>
             </button>
             <button
-              onClick={onViewNotes}
+              onClick={handleViewNotes}
               className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
             >
               <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">

@@ -1,5 +1,5 @@
 import { ArrowLeft } from 'lucide-react';
-import { ConceptNode } from '../data/courses';
+import type { ConceptNode } from '@/types/legacy';
 
 interface CheatsheetProps {
   concepts: ConceptNode[];

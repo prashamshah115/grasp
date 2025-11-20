@@ -1,5 +1,5 @@
 import { MasteryRing } from './MasteryRing';
-import type { Course } from '../data/courses';
+import type { Course } from '@/types/course';
 
 interface CourseCardProps {
   course: Course;

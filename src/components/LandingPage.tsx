@@ -1,8 +1,8 @@
-interface LandingPageProps {
-  onStart: () => void;
-}
+import { useNavigate } from 'react-router-dom'
 
-export function LandingPage({ onStart }: LandingPageProps) {
+export function LandingPage() {
+  const navigate = useNavigate()
+
   return (
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
@@ -24,7 +24,7 @@ export function LandingPage({ onStart }: LandingPageProps) {
           </p>
           <div className="flex justify-center">
             <button
-              onClick={onStart}
+              onClick={() => navigate('/courses')}
               className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-12 py-5 rounded-[14px] text-lg transition-all duration-200"
             >
               Start Final Prep

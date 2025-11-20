@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Concept } from '../../data/courses';
+import type { Concept } from '@/types/legacy';
 
 interface KillZoneProps {
   concepts: Concept[];

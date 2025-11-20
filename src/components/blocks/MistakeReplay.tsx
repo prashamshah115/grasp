@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AlertCircle, TrendingUp } from 'lucide-react';
-import type { MistakeQuestion } from '../../data/courses';
+import type { MistakeQuestion } from '@/types/legacy';
 
 interface MistakeReplayProps {
   mistakes: MistakeQuestion[];

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check, X } from 'lucide-react';
-import type { WarmupQuestion } from '../../data/courses';
+import type { WarmupQuestion } from '@/types/legacy';
 
 interface WarmupProps {
   questions: WarmupQuestion[];

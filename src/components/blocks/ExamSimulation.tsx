@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { FileText } from 'lucide-react';
-import type { ExamProblem } from '../../data/courses';
+import type { ExamProblem } from '@/types/legacy';
 
 interface ExamSimulationProps {
   problems: ExamProblem[];

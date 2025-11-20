@@ -1,4 +1,4 @@
-import { Course } from '../../data/courses';
+import type { Course } from '@/types/course';
 import { MasteryRing } from '../MasteryRing';
 import { ArrowLeft } from 'lucide-react';
 
