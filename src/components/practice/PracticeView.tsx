@@ -1,13 +1,83 @@
-import { Target, Zap, BookOpen, TrendingUp } from 'lucide-react';
-import { Course } from '../../data/courses';
-import { AIAssistant } from '../shared/AIAssistant';
+/**
+ * PracticeView Component - PHASE 4 INTEGRATED
+ * Main practice pillar view with mastery stats
+ *
+ * INTEGRATION STATUS: ✅ Complete
+ * - Uses useParams() to get courseId from URL
+ * - Uses useCourse() hook for course data (React Query)
+ * - Uses useCourseMastery() hook for mastery stats (React Query)
+ * - Uses useTopics() hook for topic data (React Query)
+ * - Uses useStartSession() mutation to create sessions
+ * - Uses useNavigate() to navigate to session
+ * - NO mock data, NO props
+ */
 
-interface PracticeViewProps {
-  course: Course;
-  onStartSession: () => void;
-}
+import { Target, Zap } from 'lucide-react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useCourse, useTopics, useCourseMastery, useStartSession } from '@/hooks'
+import { useAppStore } from '@/lib/store'
+import LoadingScreen from '../LoadingScreen'
+import { AIAssistant } from '../shared/AIAssistant'
 
-export function PracticeView({ course, onStartSession }: PracticeViewProps) {
+export function PracticeView() {
+  const { courseId } = useParams<{ courseId: string }>()
+  const navigate = useNavigate()
+  const { user } = useAppStore()
+
+  // Fetch course data with React Query
+  const { data: course, isLoading: courseLoading } = useCourse(courseId!)
+
+  // Fetch topics for this course
+  const { data: topics, isLoading: topicsLoading } = useTopics(courseId!)
+
+  // Fetch mastery data
+  const { data: mastery, isLoading: masteryLoading } = useCourseMastery(
+    user?.id || '',
+    courseId!
+  )
+
+  // Start session mutation
+  const startSession = useStartSession()
+
+  const isLoading = courseLoading || topicsLoading || masteryLoading
+
+  if (isLoading) {
+    return <LoadingScreen message="Loading practice view..." />
+  }
+
+  if (!course) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p>Course not found</p>
+      </div>
+    )
+  }
+
+  // Calculate mastery percentage from actual data
+  const totalAttempts = mastery?.reduce((sum, m) => sum + m.num_attempts, 0) || 0
+  const correctAttempts = mastery?.reduce((sum, m) => sum + m.num_correct, 0) || 0
+  const masteryPercentage = totalAttempts > 0
+    ? Math.round((correctAttempts / totalAttempts) * 100)
+    : 0
+
+  // Count weak spots (topics with low mastery)
+  const weakSpots = mastery?.filter(m => m.mastery_level === 'weak').length || 0
+
+  const totalTopics = topics?.length || 0
+
+  const handleStartSession = async () => {
+    try {
+      const session = await startSession.mutateAsync({
+        course_id: courseId!,
+        mode: 'practice',
+      })
+      // Navigate to global session route
+      navigate(`/session/${session.id}`)
+    } catch (error) {
+      console.error('Failed to start session:', error)
+    }
+  }
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-4xl mx-auto px-8 py-12">
@@ -24,19 +94,19 @@ export function PracticeView({ course, onStartSession }: PracticeViewProps) {
         <div className="grid grid-cols-3 gap-4 mb-12">
           <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-8">
             <div className="text-sm text-[#9CA3AF] mb-2">Mastery</div>
-            <div className="text-4xl mb-1">{course.masteryPercentage}%</div>
+            <div className="text-4xl mb-1">{masteryPercentage}%</div>
             <div className="text-sm text-[#6B7280]">Overall Progress</div>
           </div>
-          
+
           <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-8">
             <div className="text-sm text-[#9CA3AF] mb-2">Topics</div>
-            <div className="text-4xl mb-1">{course.totalTopics}</div>
+            <div className="text-4xl mb-1">{totalTopics}</div>
             <div className="text-sm text-[#6B7280]">Total Covered</div>
           </div>
-          
+
           <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-8">
             <div className="text-sm text-[#9CA3AF] mb-2">Focus</div>
-            <div className="text-4xl mb-1 text-[#EF4444]">{course.weakSpots}</div>
+            <div className="text-4xl mb-1 text-[#EF4444]">{weakSpots}</div>
             <div className="text-sm text-[#6B7280]">Weak Areas</div>
           </div>
         </div>
@@ -51,10 +121,11 @@ export function PracticeView({ course, onStartSession }: PracticeViewProps) {
               </p>
             </div>
             <button
-              onClick={onStartSession}
-              className="bg-white text-[#4F46E5] px-8 py-4 rounded-[12px] font-medium hover:bg-[#F9FAFB] transition-all shadow-lg"
+              onClick={handleStartSession}
+              disabled={startSession.isPending}
+              className="bg-white text-[#4F46E5] px-8 py-4 rounded-[12px] font-medium hover:bg-[#F9FAFB] transition-all shadow-lg disabled:opacity-50"
             >
-              Begin Session
+              {startSession.isPending ? 'Starting...' : 'Begin Session'}
             </button>
           </div>
         </div>
@@ -70,20 +141,22 @@ export function PracticeView({ course, onStartSession }: PracticeViewProps) {
               <h4 className="font-medium mb-2">Quick Warmup</h4>
               <p className="text-sm text-[#6B7280]">5 rapid-fire review questions</p>
             </button>
-            
+
             <button className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all group">
               <div className="w-12 h-12 rounded-[12px] bg-[#FEE2E2] flex items-center justify-center mb-4 group-hover:bg-[#FECACA] transition-colors">
                 <Target className="w-6 h-6 text-[#EF4444]" />
               </div>
               <h4 className="font-medium mb-2">Weak Spots Only</h4>
-              <p className="text-sm text-[#6B7280]">Focus on your {course.weakSpots} weak areas</p>
+              <p className="text-sm text-[#6B7280]">
+                Focus on your {weakSpots} weak areas
+              </p>
             </button>
           </div>
         </div>
       </div>
-      
+
       {/* AI Assistant */}
       <AIAssistant context={`Course: ${course.code} - Practice Mode`} />
     </div>
-  );
+  )
 }
