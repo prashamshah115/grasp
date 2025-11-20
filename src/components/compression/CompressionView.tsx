@@ -15,7 +15,7 @@ import { FileText, Sparkles, Upload, Download, FolderOpen } from 'lucide-react'
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useCourse, useTopics, useCompressionNotes, useGenerateCompression } from '@/hooks'
-import { useAppStore } from '@/lib/store'
+import { useAuth } from '@/components/auth/AuthProvider'
 import LoadingScreen from '../LoadingScreen'
 import { AIAssistant } from '../shared/AIAssistant'
 import { PDFUploadModal } from './PDFUploadModal'
@@ -23,7 +23,7 @@ import { FileManagement } from '../storage/FileManagement'
 
 export function CompressionView() {
   const { courseId } = useParams<{ courseId: string }>()
-  const { user } = useAppStore()
+  const { user } = useAuth()
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null)
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [showFileManager, setShowFileManager] = useState(false)

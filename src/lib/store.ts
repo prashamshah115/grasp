@@ -29,12 +29,15 @@ import type {
 } from '@/types/session'
 
 // Main app state interface (CLIENT STATE ONLY)
+interface AuthUser {
+  id: string
+  email: string
+  name?: string | null
+}
+
 interface AppState {
   // ==================== AUTH ====================
-  user: {
-    id: string
-    email: string
-  } | null
+  user: AuthUser | null
   setUser: (user: AppState['user']) => void
   logout: () => void
 

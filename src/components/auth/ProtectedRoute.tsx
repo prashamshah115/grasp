@@ -5,7 +5,7 @@
  */
 
 import { Navigate, useLocation } from 'react-router-dom'
-import { useAppStore } from '@/lib/store'
+import { useAuth } from '@/components/auth/AuthProvider'
 import LoadingScreen from '../LoadingScreen'
 
 interface ProtectedRouteProps {
@@ -13,7 +13,7 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user, isLoading } = useAppStore()
+  const { user, isLoading } = useAuth()
   const location = useLocation()
 
   // Show loading while checking auth

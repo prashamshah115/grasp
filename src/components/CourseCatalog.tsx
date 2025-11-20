@@ -8,15 +8,16 @@
  * - NO props, NO mock data
  */
 
-import { FileUp } from 'lucide-react';
+import { FileUp, User, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useCourses } from '@/hooks';
-import { MasteryRing } from './MasteryRing';
 import LoadingScreen from './LoadingScreen';
+import { useAuth } from '@/components/auth/AuthProvider';
 
 export function CourseCatalog() {
   const navigate = useNavigate();
   const { data: courses, isLoading } = useCourses();
+  const { user, signOut } = useAuth();
 
   if (isLoading) {
     return <LoadingScreen message="Loading courses..." />;
@@ -31,12 +32,33 @@ export function CourseCatalog() {
     console.log('Upload course clicked');
   };
 
+  const displayName = user?.name?.split(' ')[0] ?? 'Your';
+
   return (
     <div className="min-h-screen bg-white">
       {/* Header */}
       <header className="px-8 py-6 border-b border-[#E5E7EB]">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
           <h1 className="text-xl tracking-tight">grasp.ai</h1>
+
+          {user && (
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3 px-4 py-2 bg-[#F9FAFB] rounded-[10px]">
+                <div className="w-8 h-8 bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] rounded-full flex items-center justify-center">
+                  <User className="w-4 h-4 text-white" />
+                </div>
+                <span className="font-medium text-[#374151]">{user.name}</span>
+              </div>
+
+              <button
+                onClick={signOut}
+                className="p-2 text-[#6B7280] hover:text-[#EF4444] hover:bg-[#FEE2E2] rounded-[8px] transition-all"
+                title="Sign Out"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -44,7 +66,7 @@ export function CourseCatalog() {
       <main className="max-w-7xl mx-auto px-8 py-16">
         <div className="mb-16">
           <h1 className="text-5xl mb-4 tracking-tight">
-            What are you studying this quarter?
+            {displayName}'s courses
           </h1>
           <p className="text-lg text-[#6B7280]">
             Choose a course to begin your final prep

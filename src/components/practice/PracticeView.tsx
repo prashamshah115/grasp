@@ -15,14 +15,14 @@
 import { Target, Zap } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCourse, useTopics, useCourseMastery, useStartSession } from '@/hooks'
-import { useAppStore } from '@/lib/store'
+import { useAuth } from '@/components/auth/AuthProvider'
 import LoadingScreen from '../LoadingScreen'
 import { AIAssistant } from '../shared/AIAssistant'
 
 export function PracticeView() {
   const { courseId } = useParams<{ courseId: string }>()
   const navigate = useNavigate()
-  const { user } = useAppStore()
+  const { user } = useAuth()
 
   // Fetch course data with React Query
   const { data: course, isLoading: courseLoading } = useCourse(courseId!)

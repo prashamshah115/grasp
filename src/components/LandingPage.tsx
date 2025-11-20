@@ -1,14 +1,20 @@
-import { useNavigate } from 'react-router-dom'
+import { useAuth } from '@/components/auth/AuthProvider'
 
 export function LandingPage() {
-  const navigate = useNavigate()
+  const { openAuthModal } = useAuth()
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
       <header className="px-8 py-6 border-b border-[#E5E7EB]">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
           <h1 className="text-xl tracking-tight">grasp.ai</h1>
+          <button
+            onClick={() => openAuthModal('signin')}
+            className="text-sm font-medium text-[#4F46E5] hover:text-[#4338CA] transition-colors"
+          >
+            Sign In
+          </button>
         </div>
       </header>
 
@@ -24,13 +30,13 @@ export function LandingPage() {
           </p>
           <div className="flex justify-center">
             <button
-              onClick={() => navigate('/courses')}
+              onClick={() => openAuthModal('signup')}
               className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-12 py-5 rounded-[14px] text-lg transition-all duration-200"
             >
-              Start Final Prep
+              Get Started
             </button>
           </div>
-          <p className="text-sm text-[#9CA3AF] mt-6">No signup required.</p>
+          <p className="text-sm text-[#9CA3AF] mt-6">Sign up to build your finals game plan.</p>
         </div>
       </div>
 

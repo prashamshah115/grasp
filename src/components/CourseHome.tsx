@@ -15,14 +15,14 @@ import { ArrowLeft, Book, FileText, Zap, Target, RotateCcw, Layers, BookOpen } f
 import { useParams, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useCourse, useTopics, useCourseMastery } from '@/hooks';
-import { useAppStore } from '@/lib/store';
+import { useAuth } from '@/components/auth/AuthProvider';
 import { MasteryRing } from './MasteryRing';
 import LoadingScreen from './LoadingScreen';
 
 export function CourseHome() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
-  const { user } = useAppStore();
+  const { user } = useAuth();
   const [masteryMode, setMasteryMode] = useState<'pass' | 'a-level' | 'deep'>('a-level');
 
   // Fetch course data
