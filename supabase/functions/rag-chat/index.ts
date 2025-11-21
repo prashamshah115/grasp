@@ -4,6 +4,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '../_shared/rate-limit.ts'
 
 interface RAGRequest {
   message: string
@@ -127,6 +128,15 @@ serve(async (req) => {
         { status: 401 }
       )
     }
+
+    // Rate limiting check
+    const rateLimitResult = await checkRateLimit(user.id, RATE_LIMITS.rag_chat)
+    if (!rateLimitResult.allowed) {
+      console.log('[rag-chat] Rate limit exceeded for user:', user.id)
+      return rateLimitResponse(rateLimitResult)
+    }
+
+    console.log('[rag-chat] Rate limit OK - remaining:', rateLimitResult.remaining)
 
     // Parse request
     const { message, topicId, courseId, questionId } =
