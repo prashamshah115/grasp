@@ -65,11 +65,14 @@ export function PracticeView() {
 
   const totalTopics = topics?.length || 0
 
-  const handleStartSession = async () => {
+  const handleStartSession = async (mode: 'practice' | 'global' = 'global') => {
+    if (!user) return
+
     try {
       const session = await startSession.mutateAsync({
+        user_id: user.id,
         course_id: courseId!,
-        mode: 'practice',
+        mode,
       })
       // Navigate to global session route
       navigate(`/session/${session.id}`)
@@ -134,20 +137,31 @@ export function PracticeView() {
         <div>
           <h3 className="text-xl mb-4">Quick Start</h3>
           <div className="grid grid-cols-2 gap-4">
-            <button className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all group">
+            <button
+              onClick={() => handleStartSession('global')}
+              disabled={startSession.isPending}
+              className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <div className="w-12 h-12 rounded-[12px] bg-[#FEF3C7] flex items-center justify-center mb-4 group-hover:bg-[#FDE68A] transition-colors">
                 <Zap className="w-6 h-6 text-[#F59E0B]" />
               </div>
               <h4 className="font-medium mb-2">Quick Warmup</h4>
               <p className="text-sm text-[#6B7280]">5 rapid-fire review questions</p>
             </button>
-            
-            <button className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all group">
+
+            <button
+              onClick={() => handleStartSession('global')}
+              disabled={startSession.isPending || weakSpots === 0}
+              className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
+              title={weakSpots === 0 ? 'No weak spots to practice!' : undefined}
+            >
               <div className="w-12 h-12 rounded-[12px] bg-[#FEE2E2] flex items-center justify-center mb-4 group-hover:bg-[#FECACA] transition-colors">
                 <Target className="w-6 h-6 text-[#EF4444]" />
               </div>
               <h4 className="font-medium mb-2">Weak Spots Only</h4>
-              <p className="text-sm text-[#6B7280]">Focus on your {course.weakSpots} weak areas</p>
+              <p className="text-sm text-[#6B7280]">
+                {weakSpots > 0 ? `Focus on your ${weakSpots} weak areas` : 'No weak spots found!'}
+              </p>
             </button>
           </div>
         </div>
