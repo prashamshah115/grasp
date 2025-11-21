@@ -69,7 +69,7 @@ CREATE TRIGGER rate_limit_usage_updated_at
 -- ✅ ATOMIC INCREMENT FUNCTION
 -- Atomically increments or creates rate limit record for current minute
 CREATE OR REPLACE FUNCTION increment_rate_limit(
-  p_user_id UUID,
+  uid UUID,
   p_endpoint TEXT
 )
 RETURNS INTEGER
@@ -86,7 +86,7 @@ BEGIN
   -- Try to increment existing record
   UPDATE public.rate_limit_usage
   SET request_count = request_count + 1
-  WHERE user_id = p_user_id
+  WHERE user_id = uid
     AND endpoint = p_endpoint
     AND window_start = v_window
   RETURNING request_count INTO v_count;
@@ -94,7 +94,7 @@ BEGIN
   -- If no row was updated, insert new one
   IF NOT FOUND THEN
     INSERT INTO public.rate_limit_usage (user_id, endpoint, request_count, window_start)
-    VALUES (p_user_id, p_endpoint, 1, v_window)
+    VALUES (uid, p_endpoint, 1, v_window)
     RETURNING request_count INTO v_count;
   END IF;
 

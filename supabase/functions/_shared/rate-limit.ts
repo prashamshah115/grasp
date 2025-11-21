@@ -160,7 +160,7 @@ async function recordRequest(
   // Use PostgreSQL's date_trunc to get current minute window
   // This query gets or creates the record atomically
   const { data, error } = await supabase.rpc('increment_rate_limit', {
-    p_user_id: userId,
+    uid: userId,
     p_endpoint: endpoint
   })
 
