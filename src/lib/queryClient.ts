@@ -97,6 +97,20 @@ export const queryKeys = {
     userFiles: (userId: string) => ['storage', 'user', userId] as const,
     courseFiles: (coursePath: string) => ['storage', 'course', coursePath] as const,
   },
+  // User Courses
+  userCourses: {
+    all: ['user-courses'] as const,
+  },
+  // Premium
+  premium: {
+    status: ['premium', 'status'] as const,
+  },
+  // Course Uploads
+  courseUploads: {
+    all: ['course-uploads'] as const,
+    byCourse: (courseId: string) => ['course-uploads', 'course', courseId] as const,
+    byUser: (userId: string) => ['course-uploads', 'user', userId] as const,
+  },
 } as const
 
 // Type helpers for query results

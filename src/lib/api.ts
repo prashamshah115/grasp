@@ -591,6 +591,161 @@ export async function ingestDocument(documentId: string) {
   })
 }
 
+// ==================== USER COURSES ====================
+
+/**
+ * Fetch user's enrolled courses
+ */
+export async function fetchUserCourses() {
+  const user = await requireAuth()
+  
+  const { data, error } = await supabase
+    .from('user_courses')
+    .select('course_id, courses(*)')
+    .eq('user_id', user.id)
+
+  if (error) handleSupabaseError(error)
+  return data
+}
+
+/**
+ * Add course to user's enrolled courses
+ */
+export async function addUserCourse(courseId: string) {
+  const user = await requireAuth()
+  
+  const { data, error } = await supabase
+    .from('user_courses')
+    .insert({
+      user_id: user.id,
+      course_id: courseId
+    })
+    .select()
+    .single()
+
+  if (error) handleSupabaseError(error)
+  return data
+}
+
+/**
+ * Remove course from user's enrolled courses
+ */
+export async function removeUserCourse(courseId: string) {
+  const user = await requireAuth()
+  
+  const { error } = await supabase
+    .from('user_courses')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('course_id', courseId)
+
+  if (error) handleSupabaseError(error)
+}
+
+// ==================== PREMIUM USERS ====================
+
+/**
+ * Check if user has premium subscription
+ */
+export async function checkPremiumStatus() {
+  const user = await requireAuth()
+  
+  const { data, error } = await supabase
+    .from('premium_users')
+    .select('*')
+    .eq('user_id', user.id)
+    .single()
+
+  if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+    handleSupabaseError(error)
+  }
+  
+  return data || null
+}
+
+// ==================== COURSE UPLOADS ====================
+
+/**
+ * Upload course material file
+ * Uses course-materials bucket and creates both course_uploads and documents records
+ * Note: courseId is required for course materials (documents table requires course_id)
+ */
+export async function uploadCourseMaterial(file: File, courseId: string) {
+  const user = await requireAuth()
+  
+  if (!courseId) {
+    throw new ValidationError('Course ID is required for course material uploads')
+  }
+  
+  // Generate unique path: {user_id}/{uuid}-{filename}
+  const path = `${user.id}/${crypto.randomUUID()}-${file.name}`
+  
+  // Upload to course-materials bucket
+  const { data: uploadData, error: uploadError } = await supabase.storage
+    .from('course-materials')
+    .upload(path, file, {
+      contentType: 'application/pdf',
+      upsert: false
+    })
+
+  if (uploadError) handleSupabaseError(uploadError)
+
+  // Create document record (required for ingestion pipeline)
+  const { data: document, error: docError } = await supabase
+    .from('documents')
+    .insert({
+      course_id: courseId,
+      topic_id: null,
+      doc_type: 'slides',
+      title: file.name,
+      storage_path: path,
+      total_pages: 0,
+      has_images: false,
+    })
+    .select()
+    .single()
+
+  if (docError) handleSupabaseError(docError)
+
+  // Create course_uploads record (for tracking user uploads)
+  const { data: upload, error: uploadRecordError } = await supabase
+    .from('course_uploads')
+    .insert({
+      user_id: user.id,
+      course_id: courseId,
+      storage_path: path,
+      original_filename: file.name,
+      processed: false
+    })
+    .select()
+    .single()
+
+  if (uploadRecordError) {
+    // If course_uploads fails, we still have the document, so log and continue
+    console.error('Failed to create course_uploads record:', uploadRecordError)
+  }
+
+  // Trigger background ingestion
+  const { error: triggerError } = await supabase.functions.invoke('trigger-ingest', {
+    body: {
+      document_id: document.id
+    }
+  })
+
+  if (triggerError) {
+    console.error('Failed to trigger ingestion:', triggerError)
+    // Don't throw - upload succeeded, ingestion can be retried
+  } else if (upload) {
+    // Update course_uploads with processed status
+    await supabase
+      .from('course_uploads')
+      .update({ processed: true, processed_at: new Date().toISOString() })
+      .eq('id', upload.id)
+  }
+
+  return upload || { id: document.id, storage_path: path, original_filename: file.name }
+}
+
 // ==================== RE-EXPORT EXTENSIONS ====================
 // Phase 5: Additional API functions for complete backend coverage
 export {

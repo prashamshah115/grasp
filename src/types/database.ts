@@ -333,6 +333,78 @@ export interface Database {
           is_completed?: boolean
         }
       }
+      user_courses: {
+        Row: {
+          user_id: string
+          course_id: string
+          created_at: string
+        }
+        Insert: {
+          user_id: string
+          course_id: string
+          created_at?: string
+        }
+        Update: {
+          user_id?: string
+          course_id?: string
+          created_at?: string
+        }
+      }
+      premium_users: {
+        Row: {
+          user_id: string
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          upgraded_at: string | null
+        }
+        Insert: {
+          user_id: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          upgraded_at?: string | null
+        }
+        Update: {
+          user_id?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          upgraded_at?: string | null
+        }
+      }
+      course_uploads: {
+        Row: {
+          id: string
+          user_id: string
+          course_id: string | null
+          storage_path: string
+          original_filename: string | null
+          uploaded_at: string
+          processed: boolean
+          processed_at: string | null
+          trigger_job_id: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          course_id?: string | null
+          storage_path: string
+          original_filename?: string | null
+          uploaded_at?: string
+          processed?: boolean
+          processed_at?: string | null
+          trigger_job_id?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          course_id?: string | null
+          storage_path?: string
+          original_filename?: string | null
+          uploaded_at?: string
+          processed?: boolean
+          processed_at?: string | null
+          trigger_job_id?: string | null
+        }
+      }
     }
     Views: {
       [_ in never]: never

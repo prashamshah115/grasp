@@ -37,3 +37,6 @@ export * from './useGlobalPractice'
 
 // Storage & File Upload
 export * from './useStorage'
+
+// User Courses & Course Uploads
+export * from './useUserCourses'

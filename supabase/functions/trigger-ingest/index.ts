@@ -44,9 +44,26 @@ serve(async (req) => {
       )
     }
 
-    const { document_id } = await req.json() as TriggerIngestRequest
+    const input = await req.json() as TriggerIngestRequest
+    const { document_id } = input
 
     console.log('[trigger-ingest] Request:', { userId: user.id, documentId: document_id })
+
+    // Get Trigger.dev config
+    const triggerUrl = Deno.env.get('TRIGGER_API_URL')
+    const triggerKey = Deno.env.get('TRIGGER_SECRET_KEY')
+
+    if (!triggerUrl || !triggerKey) {
+      throw new Error('Trigger.dev not configured. Set TRIGGER_API_URL and TRIGGER_SECRET_KEY')
+    }
+
+    // Validate document_id
+    if (!document_id) {
+      return new Response(
+        JSON.stringify({ error: 'Missing document_id' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
 
     // Get document details
     const { data: document, error: docError } = await supabase
@@ -83,14 +100,6 @@ serve(async (req) => {
       .from('documents')
       .update({ status: 'queued', processing_step: 'waiting' })
       .eq('id', document_id)
-
-    // Trigger the Trigger.dev worker
-    const triggerUrl = Deno.env.get('TRIGGER_API_URL')
-    const triggerKey = Deno.env.get('TRIGGER_SECRET_KEY')
-
-    if (!triggerUrl || !triggerKey) {
-      throw new Error('Trigger.dev not configured. Set TRIGGER_API_URL and TRIGGER_SECRET_KEY')
-    }
 
     console.log('[trigger-ingest] Triggering Trigger.dev worker...')
 
