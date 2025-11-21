@@ -1,11 +1,13 @@
-import { defineConfig } from "@trigger.dev/sdk/v3";
+import { defineConfig } from "@trigger.dev/sdk";
+import { pythonExtension } from "@trigger.dev/python/extension";
 
 export default defineConfig({
   // 🔥 REQUIRED — replace with your actual Trigger.dev project ID
-  project: "proj_YOUR_PROJECT_ID",
+  project: "proj_gvongxitjrhgfakcmidx",
 
   runtime: "node",
   logLevel: "info",
+  maxDuration: 1500, // 25 minutes
 
   retries: {
     enabledInDev: true,
@@ -18,23 +20,17 @@ export default defineConfig({
     },
   },
 
-  // 🔥 Directory for your tasks (Claude is correct)
-  dirs: ["./trigger"],
+  // 🔥 Directory for your tasks (relative to config file location)
+  dirs: ["./tasks"],
 
   // 🔥 Python extension — REQUIRED for:
   // - pymupdf4llm PDF → markdown
   // - BGE embeddings (sentence-transformers)
-  extensions: [
-    {
-      name: "python",
-      config: {
-        pythonVersion: "3.11",
-        packages: [
-          "pymupdf4llm",
-          "sentence-transformers",
-          "torch"
-        ]
-      }
-    }
-  ]
+  build: {
+    extensions: [
+      pythonExtension({
+        requirementsFile: "./requirements.txt",
+      }),
+    ],
+  },
 });

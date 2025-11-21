@@ -21,8 +21,8 @@ serve(async (req) => {
   try {
     // Initialize Supabase client
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      Deno.env.get('PUBLIC_SUPABASE_URL')!,
+      Deno.env.get('SERVICE_ROLE_KEY')!
     )
 
     // Get authenticated user
@@ -94,7 +94,7 @@ serve(async (req) => {
 
     console.log('[trigger-ingest] Triggering Trigger.dev worker...')
 
-    const triggerResponse = await fetch(`${triggerUrl}/api/v1/tasks/ingest_pdf_bge/trigger`, {
+    const triggerResponse = await fetch(`${triggerUrl}/api/v1/tasks/ingest-document/trigger`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

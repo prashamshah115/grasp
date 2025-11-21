@@ -1,4 +1,4 @@
-import { task } from "@trigger.dev/sdk/v3";
+import { task } from "@trigger.dev/sdk";
 import { createClient } from '@supabase/supabase-js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -291,7 +291,7 @@ export const embedPDFv2 = task({
       await supabase
         .from('documents')
         .update({
-          status: 'failed',
+          status: 'error', // Valid status per database constraint
           error_message: (error as Error).message
         })
         .eq('id', documentId);

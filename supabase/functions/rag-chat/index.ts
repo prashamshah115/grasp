@@ -25,36 +25,44 @@ interface RAGResponse {
 }
 
 // ------------------------------------------
-// EMBEDDING HELPER — Trigger.dev BGE 768d
+// EMBEDDING HELPER — Jina API (BGE-compatible, 768d)
 // ------------------------------------------
 async function generateBGEEmbedding(text: string): Promise<number[]> {
-  const triggerUrl = Deno.env.get('TRIGGER_API_URL')
-  const triggerKey = Deno.env.get('TRIGGER_SECRET_KEY')
-
-  if (!triggerUrl || !triggerKey) {
-    throw new Error('Trigger.dev not configured. Missing TRIGGER_API_URL or TRIGGER_SECRET_KEY')
+  const jinaApiKey = Deno.env.get('JINA_API_KEY')
+  
+  if (!jinaApiKey) {
+    throw new Error('JINA_API_KEY not configured')
   }
 
   try {
-    const response = await fetch(`${triggerUrl}/embed-text`, {
+    const response = await fetch('https://api.jina.ai/v1/embeddings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${triggerKey}`
+        'Authorization': `Bearer ${jinaApiKey}`
       },
-      body: JSON.stringify({ text })
+      body: JSON.stringify({
+        model: 'jina-embeddings-v2-base-en', // BGE-compatible, 768 dimensions
+        input: [text] // Single query text
+      })
     })
 
     if (!response.ok) {
       const err = await response.text()
-      throw new Error(`Trigger.dev embedding failed: ${err}`)
+      throw new Error(`Jina API error: ${response.status} - ${err}`)
     }
 
     const data = await response.json()
-    return data.embedding // 768d output
+    const embedding = data.data[0].embedding
+
+    if (!embedding || embedding.length !== 768) {
+      throw new Error(`Invalid embedding: expected 768d, got ${embedding?.length || 0}`)
+    }
+
+    return embedding
   } catch (error) {
     console.error('[rag-chat] Embedding generation failed:', error)
-    throw new Error('Failed to generate BGE embedding')
+    throw new Error(`Failed to generate BGE embedding: ${(error as Error).message}`)
   }
 }
 
@@ -97,8 +105,8 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
 serve(async (req) => {
   try {
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      Deno.env.get('PUBLIC_SUPABASE_URL')!,
+      Deno.env.get('SERVICE_ROLE_KEY')!
     )
 
     // Auth

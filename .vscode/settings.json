@@ -1,0 +1,12 @@
+{
+  "deno.enable": true,
+  "deno.enablePaths": [
+    "supabase/functions"
+  ],
+  "[typescript]": {
+    "editor.defaultFormatter": "denoland.vscode-deno"
+  },
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enable": true
+}
+

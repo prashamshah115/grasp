@@ -8,8 +8,8 @@ interface IngestRequest {
 serve(async (req) => {
   try {
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      Deno.env.get('PUBLIC_SUPABASE_URL')!,
+      Deno.env.get('SERVICE_ROLE_KEY')!
     )
 
     // Get user from auth header
@@ -66,11 +66,21 @@ serve(async (req) => {
     console.log('[ingest-document] Got signed URL, triggering worker...')
 
     // Trigger Trigger.dev worker for PDF processing
-    const triggerResponse = await fetch(`${Deno.env.get('TRIGGER_API_URL')}/api/v1/tasks/embed-pdf-v2/trigger`, {
+    const triggerUrl = Deno.env.get('TRIGGER_API_URL')
+    const triggerKey = Deno.env.get('TRIGGER_SECRET_KEY')
+
+    if (!triggerUrl || !triggerKey) {
+      return new Response(
+        JSON.stringify({ error: 'Trigger.dev not configured. Set TRIGGER_API_URL and TRIGGER_SECRET_KEY' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const triggerResponse = await fetch(`${triggerUrl}/api/v1/tasks/ingest-document/trigger`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Deno.env.get('TRIGGER_API_KEY')}`
+        'Authorization': `Bearer ${triggerKey}`
       },
       body: JSON.stringify({
         payload: {
