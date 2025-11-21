@@ -26,6 +26,7 @@ import { ArrowLeft, ChevronRight, Lightbulb, Loader2 } from 'lucide-react'
 import { useAuth } from '@/components/auth/AuthProvider'
 import { useGlobalQuestion, useUpdateQuestionHistory } from '@/hooks/useGlobalPractice'
 import { useSubmitAnswer, useEndSession } from '@/hooks/useSessions'
+import { useUpdateMastery } from '@/hooks/useMastery'
 import { fetchSessionDetails } from '@/lib/api'
 import type { Database } from '@/types/database'
 import type { SubmitAnswerResponse } from '@/types/api'
@@ -73,6 +74,9 @@ export function PracticeSession() {
 
   // End session
   const endSessionMutation = useEndSession()
+
+  // Update mastery after session
+  const updateMasteryMutation = useUpdateMastery()
 
   // ==================== EFFECTS ====================
 
@@ -149,10 +153,15 @@ export function PracticeSession() {
   }
 
   const handleEndSession = async () => {
-    if (!session) return
+    if (!session || !user) return
 
     try {
       const result = await endSessionMutation.mutateAsync({
+        session_id: session.id,
+      })
+
+      // Update mastery after session completes
+      await updateMasteryMutation.mutateAsync({
         session_id: session.id,
       })
 
