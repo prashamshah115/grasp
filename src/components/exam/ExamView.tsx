@@ -6,23 +6,26 @@
  * - Uses useParams() to get courseId from URL
  * - Uses useCourse() hook for course data (React Query)
  * - Uses useExams() hook to fetch exams list (React Query)
+ * - Fetches user's past exam attempts with scores (React Query)
  * - Navigates to /exam/:examId when user clicks an exam
- * - Shows past exam attempts (placeholder for now)
+ * - Shows past exam attempts with scores and click-to-view-results
  * - NO mock data, NO props
  */
 
-import { Trophy, Clock, FileCheck, AlertCircle } from 'lucide-react'
+import { Trophy, Clock, FileCheck, AlertCircle, CheckCircle } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCourse } from '@/hooks'
+import { useAuth } from '@/components/auth/AuthProvider'
 import LoadingScreen from '../LoadingScreen'
 import { AIAssistant } from '../shared/AIAssistant'
 import { useQuery } from '@tanstack/react-query'
-import { fetchExams } from '@/lib/api'
+import { fetchExams, fetchUserExamSessions } from '@/lib/api'
 import { queryKeys } from '@/lib/queryClient'
 
 export function ExamView() {
   const { courseId } = useParams<{ courseId: string }>()
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   // Fetch course data
   const { data: course, isLoading: courseLoading } = useCourse(courseId!)
@@ -33,6 +36,18 @@ export function ExamView() {
     queryFn: () => fetchExams(courseId!),
     enabled: !!courseId,
   })
+
+  // Fetch user's past exam sessions
+  const { data: allSessions, isLoading: sessionsLoading } = useQuery({
+    queryKey: ['userExamSessions', user?.id],
+    queryFn: () => fetchUserExamSessions(user!.id),
+    enabled: !!user,
+  })
+
+  // Filter sessions for exams in this course
+  const pastSessions = allSessions?.filter((session: any) =>
+    exams?.some(exam => exam.id === session.exam_id)
+  ) || []
 
   const isLoading = courseLoading || examsLoading
 
@@ -130,16 +145,92 @@ export function ExamView() {
           </div>
         </div>
 
-        {/* Past Attempts - Placeholder */}
+        {/* Past Attempts */}
         <div>
           <h3 className="text-xl mb-4">Previous Attempts</h3>
           <div className="space-y-3">
-            {/* TODO: Fetch and display real past attempts */}
-            <div className="bg-[#F9FAFB] border-2 border-dashed border-[#E5E7EB] rounded-[14px] p-8 text-center">
-              <div className="text-[#6B7280]">
-                No previous attempts yet. Take your first practice exam to get started.
+            {pastSessions.length > 0 ? (
+              pastSessions.map((session: any) => {
+                const score = session.score || 0
+                const isCompleted = session.status === 'completed'
+                const scoreColor =
+                  score >= 80 ? 'text-[#10B981]' :
+                  score >= 60 ? 'text-[#F59E0B]' :
+                  'text-[#EF4444]'
+                const scoreBgColor =
+                  score >= 80 ? 'bg-[#D1FAE5]' :
+                  score >= 60 ? 'bg-[#FEF3C7]' :
+                  'bg-[#FEE2E2]'
+
+                return (
+                  <div
+                    key={session.id}
+                    onClick={() => {
+                      if (isCompleted) {
+                        navigate(`/exam/${session.exam_id}/results`, {
+                          state: { sessionId: session.id }
+                        })
+                      }
+                    }}
+                    className={`bg-white border border-[#E5E7EB] rounded-[14px] p-6 ${
+                      isCompleted ? 'cursor-pointer hover:border-[#4F46E5] transition-all' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h4 className="font-medium text-[#111827]">
+                            {session.exams?.title || 'Exam'}
+                          </h4>
+                          {isCompleted && (
+                            <CheckCircle className="w-5 h-5 text-[#10B981]" />
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-[#6B7280]">
+                          <span>
+                            {new Date(session.started_at).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                          {session.exams?.duration_minutes && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-4 h-4" />
+                              {session.exams.duration_minutes} min
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4">
+                        {isCompleted ? (
+                          <div className={`px-4 py-2 rounded-[10px] ${scoreBgColor}`}>
+                            <div className={`text-2xl font-bold ${scoreColor}`}>
+                              {score}%
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="px-4 py-2 rounded-[10px] bg-[#F3F4F6]">
+                            <div className="text-sm font-medium text-[#6B7280]">
+                              In Progress
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="bg-[#F9FAFB] border-2 border-dashed border-[#E5E7EB] rounded-[14px] p-8 text-center">
+                <div className="text-[#6B7280]">
+                  No previous attempts yet. Take your first practice exam to get started.
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
