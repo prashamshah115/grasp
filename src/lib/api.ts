@@ -517,10 +517,9 @@ export async function ragChat(request: RAGChatRequest): Promise<RAGChatResponse>
   return retryWithBackoff(async () => {
     const { data, error } = await supabase.functions.invoke<RAGChatResponse>('rag-chat', {
       body: {
-        user_id: user.id,
-        topic_id: request.topic_id,
-        question_id: request.question_id,
         message: request.message,
+        topicId: request.topic_id,
+        questionId: request.question_id,
       },
     })
 
@@ -545,8 +544,7 @@ export async function getNextGlobalQuestion(
       'next-global-question',
       {
         body: {
-          user_id: user.id,
-          course_id: request.course_id,
+          courseId: request.course_id,
         },
       }
     )
@@ -572,9 +570,8 @@ export async function updateQuestionHistory(
       'update-question-history',
       {
         body: {
-          user_id: user.id,
-          question_id: request.question_id,
-          is_correct: request.is_correct,
+          questionId: request.question_id,
+          isCorrect: request.is_correct,
         },
       }
     )
@@ -600,8 +597,7 @@ export async function generateCompression(
       'generate-compression',
       {
         body: {
-          user_id: user.id,
-          topic_id: request.topic_id,
+          topicId: request.topic_id,
         },
       }
     )
@@ -623,7 +619,7 @@ export async function updateMastery(request: UpdateMasteryRequest): Promise<Upda
       'update-mastery',
       {
         body: {
-          session_id: request.session_id,
+          sessionId: request.session_id,
         },
       }
     )
