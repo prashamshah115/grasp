@@ -34,6 +34,7 @@ import { PracticeView } from './components/practice/PracticeView'
 import { CompressionView } from './components/compression/CompressionView'
 import { ExamView } from './components/exam/ExamView'
 import { ExamSimulation } from './components/exam/ExamSimulation'
+import { ExamSessionStarter } from './components/exam/ExamSessionStarter'
 
 // Practice session component (named export)
 import { PracticeSession } from './components/PracticeSession'
@@ -125,15 +126,14 @@ const routes: RouteObject[] = [
         ),
       },
 
-      // Exam start route (loader creates session, redirects to exam-session)
+      // Exam start route (creates session, redirects to exam-session)
       {
         path: 'exam/:examId/start',
-        loader: async ({ params }) => {
-          // This will be implemented with useCreateExamSession mutation
-          // For now, placeholder redirect
-          return redirect(`/exam-session/placeholder`)
-        },
-        element: null,
+        element: (
+          <ProtectedRoute>
+            <ExamSessionStarter />
+          </ProtectedRoute>
+        ),
       },
 
       // Full-screen exam session

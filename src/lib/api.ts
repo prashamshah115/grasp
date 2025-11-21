@@ -336,6 +336,116 @@ export async function fetchExamSession(sessionId: string) {
 }
 
 /**
+ * ✅ NEW: Fetch full exam session with questions and metadata
+ * Used for loading existing exam sessions (e.g., on page refresh)
+ * Returns questions WITHOUT correct answers for security
+ */
+export async function fetchExamSessionWithQuestions(
+  sessionId: string
+): Promise<CreateExamSessionResponse> {
+  const user = await requireAuth()
+
+  // Fetch session
+  const { data: session, error: sessionError } = await supabase
+    .from('exam_sessions')
+    .select(`
+      id,
+      exam_id,
+      user_id,
+      started_at,
+      time_remaining_sec,
+      is_completed,
+      exams!inner(
+        id,
+        name,
+        exam_type,
+        duration_min,
+        course_id,
+        courses!inner(
+          code,
+          name
+        )
+      )
+    `)
+    .eq('id', sessionId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (sessionError || !session) {
+    throw new Error('Exam session not found or access denied')
+  }
+
+  if (session.is_completed) {
+    throw new Error('This exam has already been submitted')
+  }
+
+  const exam = session.exams as any
+  const course = exam.courses
+
+  // Fetch questions for this exam (WITHOUT correct_answer)
+  const { data: examQuestions, error: questionsError } = await supabase
+    .from('exam_questions')
+    .select(`
+      question_id,
+      questions!inner(
+        id,
+        prompt,
+        q_type,
+        options,
+        difficulty,
+        source_ref,
+        hint
+      )
+    `)
+    .eq('exam_id', session.exam_id)
+    .order('question_number', { ascending: true })
+
+  if (questionsError) {
+    throw questionsError
+  }
+
+  // Calculate total questions
+  const totalQuestions = examQuestions?.length || 0
+
+  // Format questions (without correct_answer)
+  const questions = examQuestions?.map((eq: any, index: number) => ({
+    id: eq.questions.id,
+    question_number: index + 1,
+    prompt: eq.questions.prompt,
+    q_type: eq.questions.q_type,
+    options: eq.questions.options,
+    difficulty: eq.questions.difficulty,
+    source_ref: eq.questions.source_ref,
+    hint: eq.questions.hint,
+    // correct_answer intentionally omitted for security
+  })) || []
+
+  // Calculate time remaining
+  const startedAt = new Date(session.started_at)
+  const durationMs = exam.duration_min * 60 * 1000
+  const endsAt = new Date(startedAt.getTime() + durationMs)
+  const timeRemainingMs = endsAt.getTime() - Date.now()
+  const timeRemainingSec = Math.max(0, Math.floor(timeRemainingMs / 1000))
+
+  return {
+    session_id: session.id,
+    exam: {
+      id: exam.id,
+      name: exam.name,
+      exam_type: exam.exam_type,
+      duration_minutes: exam.duration_min,
+      total_questions: totalQuestions,
+      course_code: course.code,
+      course_name: course.name,
+    },
+    questions,
+    started_at: session.started_at,
+    ends_at: endsAt.toISOString(),
+    time_remaining_sec: timeRemainingSec,
+  }
+}
+
+/**
  * ✅ IMPLEMENTED: Create exam session (SERVER-SIDE via edge function)
  * Securely initializes exam session with:
  * - User enrollment validation
