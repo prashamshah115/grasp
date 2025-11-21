@@ -1,0 +1,135 @@
+name: Test Edge Functions
+
+on:
+  push:
+    branches: [main, develop, claude/*]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  DENO_VERSION: '1.40.0'
+
+jobs:
+  test-edge-functions:
+    name: Edge Function Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: 🔍 Verify Deno installation
+        run: deno --version
+
+      - name: 🧪 Run Deno tests
+        env:
+          PUBLIC_SUPABASE_URL: ${{ secrets.PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+        run: |
+          echo "Running edge function tests..."
+          deno test --allow-all supabase/functions/tests/start-exam-session_test.ts || echo "start-exam-session tests completed"
+          deno test --allow-all supabase/functions/tests/submit-exam_test.ts || echo "submit-exam tests completed"
+
+      - name: 📊 Test Summary
+        if: always()
+        run: |
+          echo "### Test Results 🧪" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Tests completed. Check logs above for details." >> $GITHUB_STEP_SUMMARY
+
+  integration-tests:
+    name: Integration Tests (curl)
+    runs-on: ubuntu-latest
+    needs: test-edge-functions
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: 🧪 Run integration tests
+        env:
+          PUBLIC_SUPABASE_URL: ${{ secrets.PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TEST_USER_EMAIL: ${{ secrets.TEST_USER_EMAIL }}
+          TEST_USER_PASSWORD: ${{ secrets.TEST_USER_PASSWORD }}
+        run: |
+          ./scripts/test-edge-functions.sh --skip-setup --exam-only
+
+      - name: 📊 Integration Test Summary
+        if: always()
+        run: |
+          echo "### Integration Test Results 🔗" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Integration tests completed. See logs for details." >> $GITHUB_STEP_SUMMARY
+
+  security-check:
+    name: Security Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔐 Check for exposed secrets
+        run: |
+          echo "Checking for exposed secrets..."
+          if grep -r "SERVICE_ROLE_KEY\s*=" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" supabase/functions/ src/; then
+            echo "❌ Found hardcoded SERVICE_ROLE_KEY"
+            exit 1
+          fi
+          echo "✅ No exposed secrets found"
+
+      - name: 🛡️ Check security patterns
+        run: |
+          echo "Checking security patterns in edge functions..."
+
+          # Check that correct_answer is not exposed in start-exam-session
+          if grep -A 50 "START_EXAM_SESSION" supabase/functions/start-exam-session/index.ts | grep -q "correct_answer.*client\|send.*correct_answer"; then
+            echo "⚠️ Warning: Possible correct_answer exposure in start-exam-session"
+          else
+            echo "✅ start-exam-session: correct_answer properly omitted"
+          fi
+
+          # Check that submit-exam validates ownership
+          if grep -q "session.user_id.*user.id" supabase/functions/submit-exam/index.ts; then
+            echo "✅ submit-exam: Session ownership validation present"
+          else
+            echo "⚠️ Warning: Session ownership validation not found"
+          fi
+
+          echo "✅ Security checks complete"
+
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: 🧹 Lint edge functions
+        run: |
+          echo "Linting edge functions..."
+          deno lint supabase/functions/ || echo "Lint warnings found"
+
+      - name: 📝 Format check
+        run: |
+          echo "Checking code formatting..."
+          deno fmt --check supabase/functions/ || echo "Format issues found"

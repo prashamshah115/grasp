@@ -115,12 +115,43 @@ export interface EndSessionResponse {
 }
 
 // ==================== EXAM SESSION ====================
+
+/**
+ * Request to start a new exam session (via start-exam-session edge function)
+ */
 export interface CreateExamSessionRequest {
-  user_id: string
-  exam_id: string
+  exam_id: string // User ID inferred from auth token
 }
 
-export type CreateExamSessionResponse = Database['public']['Tables']['exam_sessions']['Row']
+/**
+ * Response from start-exam-session edge function
+ * Includes exam metadata and questions WITHOUT correct answers
+ */
+export interface CreateExamSessionResponse {
+  session_id: string
+  exam: {
+    id: string
+    name: string
+    exam_type: string
+    duration_minutes: number
+    total_questions: number
+    course_code: string
+    course_name: string
+  }
+  questions: Array<{
+    id: string
+    question_number: number
+    prompt: string
+    q_type: string
+    options?: any
+    difficulty: number
+    source_ref?: string
+    // NOTE: correct_answer intentionally omitted for security
+  }>
+  started_at: string
+  ends_at: string
+  time_remaining_sec: number
+}
 
 export interface SaveExamAnswerRequest {
   session_id: string
@@ -134,14 +165,49 @@ export interface SaveExamAnswerResponse {
   time_remaining_sec: number
 }
 
+/**
+ * Request to submit exam (via submit-exam edge function)
+ */
 export interface SubmitExamRequest {
-  session_id: string
+  session_id: string // User ID inferred from auth token
 }
 
+/**
+ * Response from submit-exam edge function
+ * Includes detailed breakdown with correct answers (now safe to show)
+ */
 export interface SubmitExamResponse {
-  success: boolean
-  score: number
+  success: true
+  session_id: string
+  exam_name: string
+  score: number // 0-100 percentage
+  points_earned: number
+  points_possible: number
   total_questions: number
+  correct_count: number
+  incorrect_count: number
+  unanswered_count: number
+  time_taken_sec: number
+  breakdown: Array<{
+    question_id: string
+    question_number: number
+    prompt: string
+    q_type: string
+    is_correct: boolean
+    user_answer: any
+    correct_answer: any // NOW included after submission
+    explanation: string | null
+    topic_id: string
+    points_earned: number
+    points_possible: number
+  }>
+  performance_by_topic: Array<{
+    topic_id: string
+    topic_name: string
+    correct: number
+    total: number
+    percentage: number
+  }>
 }
 
 // ==================== UPLOAD DOCUMENT ====================

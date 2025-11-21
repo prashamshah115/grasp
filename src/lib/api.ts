@@ -336,72 +336,63 @@ export async function fetchExamSession(sessionId: string) {
 }
 
 /**
- * ✅ IMPLEMENTED: Create exam session
+ * ✅ IMPLEMENTED: Create exam session (SERVER-SIDE via edge function)
+ * Securely initializes exam session with:
+ * - User enrollment validation
+ * - Duplicate session prevention
+ * - Questions loaded without correct answers
+ * - Server-side authorization
  */
 export async function createExamSession(
   request: CreateExamSessionRequest
 ): Promise<CreateExamSessionResponse> {
   const user = await requireAuth()
 
-  const { data, error } = await supabase
-    .from('exam_sessions')
-    .insert({
-      user_id: user.id,
-      exam_id: request.exam_id,
-      started_at: new Date().toISOString(),
-      is_completed: false,
-    })
-    .select()
-    .single()
+  return retryWithBackoff(async () => {
+    const { data, error } = await supabase.functions.invoke<CreateExamSessionResponse>(
+      'start-exam-session',
+      {
+        body: {
+          exam_id: request.exam_id,
+        },
+      }
+    )
 
-  if (error) handleSupabaseError(error)
-  return data
+    if (error) throw error
+    if (!data) throw new Error('No data returned from start-exam-session')
+
+    return data
+  })
 }
 
 /**
- * ✅ IMPLEMENTED: Submit exam
+ * ✅ IMPLEMENTED: Submit exam (SERVER-SIDE via edge function)
+ * Securely scores exam with:
+ * - Server-side answer validation
+ * - Hidden correct answers during exam
+ * - Ownership verification
+ * - Double submission prevention
+ * - Performance tracking by topic
+ * - Question attempt recording for spaced repetition
  */
 export async function submitExam(request: SubmitExamRequest): Promise<SubmitExamResponse> {
   const user = await requireAuth()
 
-  // Get all exam answers
-  const { data: answers, error: answersError } = await supabase
-    .from('exam_answers')
-    .select('question_id, user_answer')
-    .eq('session_id', request.session_id)
+  return retryWithBackoff(async () => {
+    const { data, error } = await supabase.functions.invoke<SubmitExamResponse>(
+      'submit-exam',
+      {
+        body: {
+          session_id: request.session_id,
+        },
+      }
+    )
 
-  if (answersError) handleSupabaseError(answersError)
+    if (error) throw error
+    if (!data) throw new Error('No data returned from submit-exam')
 
-  // Calculate score
-  let correctCount = 0
-  const totalQuestions = answers?.length || 0
-
-  for (const answer of answers || []) {
-    const question = await fetchQuestion(answer.question_id)
-    if (JSON.stringify(question.correct_answer) === JSON.stringify(answer.user_answer)) {
-      correctCount++
-    }
-  }
-
-  const score = totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0
-
-  // Update exam session
-  const { error: updateError } = await supabase
-    .from('exam_sessions')
-    .update({
-      submitted_at: new Date().toISOString(),
-      is_completed: true,
-      score,
-    })
-    .eq('id', request.session_id)
-
-  if (updateError) handleSupabaseError(updateError)
-
-  return {
-    success: true,
-    score,
-    total_questions: totalQuestions,
-  }
+    return data
+  })
 }
 
 // ==================== EDGE FUNCTIONS ====================
