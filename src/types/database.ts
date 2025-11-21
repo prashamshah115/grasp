@@ -246,30 +246,80 @@ export interface Database {
           created_at?: string
         }
       }
+      question_history: {
+        Row: {
+          id: string
+          user_id: string
+          question_id: string
+          times_seen: number
+          times_correct: number
+          accuracy: number
+          next_review: string | null
+          last_seen: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          question_id: string
+          times_seen?: number
+          times_correct?: number
+          accuracy?: number
+          next_review?: string | null
+          last_seen?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          question_id?: string
+          times_seen?: number
+          times_correct?: number
+          accuracy?: number
+          next_review?: string | null
+          last_seen?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
       topic_mastery: {
         Row: {
+          id: string
           user_id: string
           topic_id: string
           num_attempts: number
           num_correct: number
+          accuracy: number
           last_practiced_at: string | null
           mastery_level: 'weak' | 'moderate' | 'strong' | null
+          created_at: string
+          updated_at: string
         }
         Insert: {
+          id?: string
           user_id: string
           topic_id: string
           num_attempts?: number
           num_correct?: number
+          accuracy?: number
           last_practiced_at?: string | null
           mastery_level?: 'weak' | 'moderate' | 'strong' | null
+          created_at?: string
+          updated_at?: string
         }
         Update: {
+          id?: string
           user_id?: string
           topic_id?: string
           num_attempts?: number
           num_correct?: number
+          accuracy?: number
           last_practiced_at?: string | null
           mastery_level?: 'weak' | 'moderate' | 'strong' | null
+          created_at?: string
+          updated_at?: string
         }
       }
       compression_notes: {
@@ -301,6 +351,93 @@ export interface Database {
           is_ai_generated?: boolean
         }
       }
+      exams: {
+        Row: {
+          id: string
+          course_id: string
+          name: string
+          exam_type: 'midterm' | 'final' | 'practice'
+          duration_min: number
+          description: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          course_id: string
+          name: string
+          exam_type: 'midterm' | 'final' | 'practice'
+          duration_min: number
+          description?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          course_id?: string
+          name?: string
+          exam_type?: 'midterm' | 'final' | 'practice'
+          duration_min?: number
+          description?: string | null
+          created_at?: string
+        }
+      }
+      exam_questions: {
+        Row: {
+          id: string
+          exam_id: string
+          question_id: string
+          order_index: number
+          points: number
+        }
+        Insert: {
+          id?: string
+          exam_id: string
+          question_id: string
+          order_index: number
+          points?: number
+        }
+        Update: {
+          id?: string
+          exam_id?: string
+          question_id?: string
+          order_index?: number
+          points?: number
+        }
+      }
+      exam_answers: {
+        Row: {
+          id: string
+          session_id: string
+          user_id: string
+          question_id: string
+          user_answer: Json | null
+          answered_at: string | null
+          is_flagged: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          user_id: string
+          question_id: string
+          user_answer?: Json | null
+          answered_at?: string | null
+          is_flagged?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          session_id?: string
+          user_id?: string
+          question_id?: string
+          user_answer?: Json | null
+          answered_at?: string | null
+          is_flagged?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      }
       exam_sessions: {
         Row: {
           id: string
@@ -311,6 +448,7 @@ export interface Database {
           time_remaining_sec: number | null
           score: number | null
           is_completed: boolean
+          created_at: string
         }
         Insert: {
           id?: string
@@ -321,6 +459,7 @@ export interface Database {
           time_remaining_sec?: number | null
           score?: number | null
           is_completed?: boolean
+          created_at?: string
         }
         Update: {
           id?: string
@@ -331,6 +470,7 @@ export interface Database {
           time_remaining_sec?: number | null
           score?: number | null
           is_completed?: boolean
+          created_at?: string
         }
       }
       user_courses: {
@@ -405,6 +545,35 @@ export interface Database {
           trigger_job_id?: string | null
         }
       }
+      rate_limit_usage: {
+        Row: {
+          id: string
+          user_id: string
+          endpoint: string
+          request_count: number
+          window_start: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          endpoint: string
+          request_count?: number
+          window_start: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          endpoint?: string
+          request_count?: number
+          window_start?: string
+          created_at?: string
+          updated_at?: string
+        }
+      }
     }
     Views: {
       [_ in never]: never
@@ -445,12 +614,39 @@ export interface Database {
           similarity: number
         }[]
       }
+      search_document_pages: {
+        Args: {
+          query_embedding: number[]
+          filter_course_id: string | null
+          filter_topic_id: string | null
+          filter_user_id: string
+          match_threshold: number
+          match_count: number
+        }
+        Returns: {
+          id: string
+          document_id: string
+          page_number: number
+          content: string
+          similarity: number
+          doc_title: string
+          doc_type: string
+          public_url: string | null
+        }[]
+      }
       get_next_spaced_question: {
         Args: {
           target_user_id: string
           target_topic_ids: string[]
         }
         Returns: Database['public']['Tables']['questions']['Row'][]
+      }
+      increment_rate_limit: {
+        Args: {
+          uid: string
+          p_endpoint: string
+        }
+        Returns: number
       }
     }
     Enums: {
