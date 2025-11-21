@@ -4,6 +4,16 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  handleError,
+  handleCORS,
+  successResponse,
+  requireAuth,
+  ValidationError,
+  NotFoundError,
+  ForbiddenError,
+  isValidUUID,
+} from '../_shared/errors.ts'
 
 interface TriggerIngestRequest {
   document_id: string
@@ -18,6 +28,13 @@ interface TriggerIngestResponse {
 }
 
 serve(async (req) => {
+  const FUNCTION_NAME = 'trigger-ingest'
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return handleCORS()
+  }
+
   try {
     // Initialize Supabase client
     const supabase = createClient(
@@ -25,29 +42,30 @@ serve(async (req) => {
       Deno.env.get('SERVICE_ROLE_KEY')!
     )
 
-    // Get authenticated user
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing Authorization header' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
+    // Authenticate user (uses centralized error handling with CORS)
+    const { user } = await requireAuth(req, supabase)
+    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
+
+    // Safe JSON parsing with error handling
+    let body: TriggerIngestRequest
+    try {
+      body = await req.json() as TriggerIngestRequest
+    } catch (error) {
+      throw new ValidationError('Invalid JSON in request body')
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401 }
-      )
+    // Input validation
+    if (!body.document_id || typeof body.document_id !== 'string') {
+      throw new ValidationError('document_id is required and must be a string')
     }
 
-    const input = await req.json() as TriggerIngestRequest
-    const { document_id } = input
+    if (!isValidUUID(body.document_id)) {
+      throw new ValidationError('document_id must be a valid UUID')
+    }
 
-    console.log('[trigger-ingest] Request:', { userId: user.id, documentId: document_id })
+    const { document_id } = body
+
+    console.log(`[${FUNCTION_NAME}] Request:`, { userId: user.id, documentId: document_id })
 
     // Get Trigger.dev config
     const triggerUrl = Deno.env.get('TRIGGER_API_URL')
@@ -55,14 +73,6 @@ serve(async (req) => {
 
     if (!triggerUrl || !triggerKey) {
       throw new Error('Trigger.dev not configured. Set TRIGGER_API_URL and TRIGGER_SECRET_KEY')
-    }
-
-    // Validate document_id
-    if (!document_id) {
-      return new Response(
-        JSON.stringify({ error: 'Missing document_id' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      )
     }
 
     // Get document details
@@ -73,22 +83,16 @@ serve(async (req) => {
       .single()
 
     if (docError || !document) {
-      console.error('[trigger-ingest] Document not found:', docError)
-      return new Response(
-        JSON.stringify({ error: 'Document not found' }),
-        { status: 404 }
-      )
+      console.error(`[${FUNCTION_NAME}] Document not found:`, docError)
+      throw new NotFoundError('Document not found')
     }
 
     // Verify ownership (user must own document or be admin)
     if (document.owner_user_id && document.owner_user_id !== user.id) {
-      return new Response(
-        JSON.stringify({ error: 'Forbidden: You do not own this document' }),
-        { status: 403 }
-      )
+      throw new ForbiddenError('You do not own this document')
     }
 
-    console.log('[trigger-ingest] Document found:', {
+    console.log(`[${FUNCTION_NAME}] Document found:`, {
       id: document.id,
       title: document.title,
       storagePath: document.storage_path,
@@ -101,7 +105,7 @@ serve(async (req) => {
       .update({ status: 'queued', processing_step: 'waiting' })
       .eq('id', document_id)
 
-    console.log('[trigger-ingest] Triggering Trigger.dev worker...')
+    console.log(`[${FUNCTION_NAME}] Triggering Trigger.dev worker...`)
 
     const triggerResponse = await fetch(`${triggerUrl}/api/v1/tasks/ingest-document/trigger`, {
       method: 'POST',
@@ -120,7 +124,7 @@ serve(async (req) => {
 
     if (!triggerResponse.ok) {
       const error = await triggerResponse.text()
-      console.error('[trigger-ingest] Trigger.dev error:', error)
+      console.error(`[${FUNCTION_NAME}] Trigger.dev error:`, error)
 
       // Update document status to failed
       await supabase
@@ -136,36 +140,17 @@ serve(async (req) => {
 
     const job = await triggerResponse.json()
 
-    console.log('[trigger-ingest] Success, job ID:', job.id)
+    console.log(`[${FUNCTION_NAME}] Success, job ID:`, job.id)
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        documentId: document.id,
-        jobId: job.id,
-        status: 'queued',
-        message: 'Document ingestion started. This may take 2-5 minutes.'
-      } as TriggerIngestResponse),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
-        }
-      }
-    )
+    return successResponse({
+      success: true,
+      documentId: document.id,
+      jobId: job.id,
+      status: 'queued',
+      message: 'Document ingestion started. This may take 2-5 minutes.'
+    } as TriggerIngestResponse)
 
   } catch (error) {
-    console.error('[trigger-ingest] Error:', error)
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : 'Internal server error'
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    )
+    return handleError(error, FUNCTION_NAME)
   }
 })

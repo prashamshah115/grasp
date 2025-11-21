@@ -4,6 +4,14 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  handleError,
+  handleCORS,
+  successResponse,
+  requireAuth,
+  ValidationError,
+  isValidUUID,
+} from '../_shared/errors.ts'
 
 interface UpdateHistoryRequest {
   questionId: string
@@ -44,6 +52,13 @@ function calculateNextReview(
 }
 
 serve(async (req) => {
+  const FUNCTION_NAME = 'update-question-history'
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return handleCORS()
+  }
+
   try {
     // Init Supabase client
     const supabase = createClient(
@@ -51,28 +66,34 @@ serve(async (req) => {
       Deno.env.get('SERVICE_ROLE_KEY')!
     )
 
-    // Authentication
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing Authorization header' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
+    // Authenticate user (uses centralized error handling with CORS)
+    const { user } = await requireAuth(req, supabase)
+    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
+
+    // Safe JSON parsing with error handling
+    let body: UpdateHistoryRequest
+    try {
+      body = await req.json() as UpdateHistoryRequest
+    } catch (error) {
+      throw new ValidationError('Invalid JSON in request body')
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
+    // Input validation
+    if (!body.questionId || typeof body.questionId !== 'string') {
+      throw new ValidationError('questionId is required and must be a string')
     }
 
-    const { questionId, isCorrect } = await req.json() as UpdateHistoryRequest
+    if (!isValidUUID(body.questionId)) {
+      throw new ValidationError('questionId must be a valid UUID')
+    }
 
-    console.log('[update-question-history] Request:', {
+    if (typeof body.isCorrect !== 'boolean') {
+      throw new ValidationError('isCorrect is required and must be a boolean')
+    }
+
+    const { questionId, isCorrect } = body
+
+    console.log(`[${FUNCTION_NAME}] Request:`, {
       userId: user.id,
       questionId,
       isCorrect
@@ -137,42 +158,20 @@ serve(async (req) => {
 
     // Accuracy for frontend analytics
     const accuracy = newTimesCorrect / newTimesSeen
-    console.log('[update-question-history] Success:', {
+    console.log(`[${FUNCTION_NAME}] Success:`, {
       accuracy: (accuracy * 100).toFixed(1) + '%'
     })
 
-    // ----------------------------------------------------
-    // STEP 4 — Response
-    // ----------------------------------------------------
-    return new Response(
-      JSON.stringify({
-        success: true,
-        nextReview: nextReview.toISOString(),
-        timesSeen: newTimesSeen,
-        timesCorrect: newTimesCorrect,
-        accuracy
-      } as UpdateHistoryResponse),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers':
-            'authorization, x-client-info, apikey, content-type'
-        }
-      }
-    )
+    // Return success response with CORS headers
+    return successResponse({
+      success: true,
+      nextReview: nextReview.toISOString(),
+      timesSeen: newTimesSeen,
+      timesCorrect: newTimesCorrect,
+      accuracy
+    } as UpdateHistoryResponse)
 
-  } catch (error: any) {
-    console.error('[update-question-history] Error:', error)
-    return new Response(
-      JSON.stringify({
-        error: error?.message ?? 'Internal server error'
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    )
+  } catch (error) {
+    return handleError(error, FUNCTION_NAME)
   }
 })

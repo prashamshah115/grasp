@@ -4,6 +4,13 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  handleError,
+  handleCORS,
+  successResponse,
+  ValidationError,
+  isValidUUID,
+} from '../_shared/errors.ts'
 
 interface UpdateMasteryRequest {
   sessionId: string
@@ -21,6 +28,13 @@ function calculateMasteryLevel(accuracy: number): 'weak' | 'moderate' | 'strong'
 }
 
 serve(async (req) => {
+  const FUNCTION_NAME = 'update-mastery'
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return handleCORS()
+  }
+
   try {
     // Init Supabase client
     const supabase = createClient(
@@ -28,8 +42,25 @@ serve(async (req) => {
       Deno.env.get('SERVICE_ROLE_KEY')!
     )
 
-    const { sessionId } = await req.json() as UpdateMasteryRequest
-    console.log('[update-mastery] Request:', { sessionId })
+    // Safe JSON parsing with error handling
+    let body: UpdateMasteryRequest
+    try {
+      body = await req.json() as UpdateMasteryRequest
+    } catch (error) {
+      throw new ValidationError('Invalid JSON in request body')
+    }
+
+    // Input validation
+    if (!body.sessionId || typeof body.sessionId !== 'string') {
+      throw new ValidationError('sessionId is required and must be a string')
+    }
+
+    if (!isValidUUID(body.sessionId)) {
+      throw new ValidationError('sessionId must be a valid UUID')
+    }
+
+    const { sessionId } = body
+    console.log(`[${FUNCTION_NAME}] Request:`, { sessionId })
 
     // -----------------------------------------------
     // STEP 1: Fetch session info
@@ -61,23 +92,12 @@ serve(async (req) => {
     }
 
     if (!attempts || attempts.length === 0) {
-      console.log('[update-mastery] No attempts to process')
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: 'No attempts to process',
-          topicsUpdated: 0
-        }),
-        {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers':
-              'authorization, x-client-info, apikey, content-type'
-          }
-        }
-      )
+      console.log(`[${FUNCTION_NAME}] No attempts to process`)
+      return successResponse({
+        success: true,
+        message: 'No attempts to process',
+        topicsUpdated: 0
+      } as UpdateMasteryResponse)
     }
 
     console.log('[update-mastery] Processing', attempts.length, 'attempts')
@@ -151,34 +171,14 @@ serve(async (req) => {
       console.log('[update-mastery] Updated topic', topicId)
     }
 
-    console.log('[update-mastery] Success — topics updated:', topicStats.size)
+    console.log(`[${FUNCTION_NAME}] Success — topics updated:`, topicStats.size)
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        topicsUpdated: topicStats.size
-      } as UpdateMasteryResponse),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers':
-            'authorization, x-client-info, apikey, content-type'
-        }
-      }
-    )
+    return successResponse({
+      success: true,
+      topicsUpdated: topicStats.size
+    } as UpdateMasteryResponse)
 
-  } catch (error: any) {
-    console.error('[update-mastery] Error:', error)
-    return new Response(
-      JSON.stringify({
-        error: error?.message ?? 'Internal server error'
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    )
+  } catch (error) {
+    return handleError(error, FUNCTION_NAME)
   }
 })

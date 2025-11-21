@@ -1,6 +1,15 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '../_shared/rate-limit.ts'
+import {
+  handleError,
+  handleCORS,
+  successResponse,
+  requireAuth,
+  ValidationError,
+  NotFoundError,
+  isValidUUID,
+} from '../_shared/errors.ts'
 
 interface CompressionRequest {
   topicId: string
@@ -44,41 +53,51 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
 }
 
 serve(async (req) => {
+  const FUNCTION_NAME = 'generate-compression'
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return handleCORS()
+  }
+
   try {
     const supabase = createClient(
       Deno.env.get('PUBLIC_SUPABASE_URL')!,
       Deno.env.get('SERVICE_ROLE_KEY')!
     )
 
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing Authorization header' }),
-        {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      )
-    }
-
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
-    }
+    // Authenticate user (uses centralized error handling with CORS)
+    const { user } = await requireAuth(req, supabase)
+    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
 
     // Rate limiting check
     const rateLimitResult = await checkRateLimit(user.id, RATE_LIMITS.generate_compression)
     if (!rateLimitResult.allowed) {
-      console.log('[generate-compression] Rate limit exceeded for user:', user.id)
+      console.log(`[${FUNCTION_NAME}] Rate limit exceeded for user:`, user.id)
       return rateLimitResponse(rateLimitResult)
     }
 
-    console.log('[generate-compression] Rate limit OK - remaining:', rateLimitResult.remaining)
+    console.log(`[${FUNCTION_NAME}] Rate limit OK - remaining:`, rateLimitResult.remaining)
 
-    const { topicId } = await req.json() as CompressionRequest
-    console.log('[generate-compression] Request:', { userId: user.id, topicId })
+    // Safe JSON parsing with error handling
+    let body: CompressionRequest
+    try {
+      body = await req.json() as CompressionRequest
+    } catch (error) {
+      throw new ValidationError('Invalid JSON in request body')
+    }
+
+    // Input validation
+    if (!body.topicId || typeof body.topicId !== 'string') {
+      throw new ValidationError('topicId is required and must be a string')
+    }
+
+    if (!isValidUUID(body.topicId)) {
+      throw new ValidationError('topicId must be a valid UUID')
+    }
+
+    const { topicId } = body
+    console.log(`[${FUNCTION_NAME}] Request:`, { userId: user.id, topicId })
 
     // STEP 1: Grab all document pages for this topic (admin + user docs)
     const { data: pages, error: pagesError } = await supabase
@@ -101,13 +120,7 @@ serve(async (req) => {
 
     if (pagesError) throw pagesError
     if (!pages || pages.length === 0) {
-      return new Response(
-        JSON.stringify({
-          error: 'NoContentFound',
-          message: 'No documents found for this topic. Upload course materials first.'
-        }),
-        { status: 404, headers: { 'Content-Type': 'application/json' } }
-      )
+      throw new NotFoundError('No documents found for this topic. Upload course materials first.')
     }
 
     console.log('[generate-compression] Found', pages.length, 'pages')
@@ -127,9 +140,10 @@ serve(async (req) => {
 
     // STEP 3: Aggregate & truncate content
     const content = pages
-      .map((p: any) =>
-        `[${p.documents.title}, p.${p.page_number}]\n${p.content.substring(0, 2000)}`
-      )
+      .map((p: any) => {
+        const pageContent = p.content || ''
+        return `[${p.documents.title}, p.${p.page_number}]\n${pageContent.substring(0, 2000)}`
+      })
       .join('\n\n---\n\n')
 
     // STEP 4: Build LLM system prompt
@@ -175,31 +189,15 @@ FORMAT:
 
     if (saveError) throw saveError
 
-    console.log('[generate-compression] Success')
+    console.log(`[${FUNCTION_NAME}] Success`)
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        content: compressionContent,
-        sourceCount: pages.length
-      } as CompressionResponse),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
-        }
-      }
-    )
+    return successResponse({
+      success: true,
+      content: compressionContent,
+      sourceCount: pages.length
+    } as CompressionResponse)
 
-  } catch (error: any) {
-    console.error('[generate-compression] Error:', error)
-    return new Response(
-      JSON.stringify({
-        error: error?.message ?? 'Internal server error'
-      }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
+  } catch (error) {
+    return handleError(error, FUNCTION_NAME)
   }
 })

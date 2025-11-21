@@ -1,11 +1,27 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import {
+  handleError,
+  handleCORS,
+  successResponse,
+  requireAuth,
+  ValidationError,
+  NotFoundError,
+  isValidUUID,
+} from '../_shared/errors.ts'
 
 interface GlobalQuestionRequest {
   courseId: string
 }
 
 serve(async (req) => {
+  const FUNCTION_NAME = 'next-global-question'
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return handleCORS()
+  }
+
   try {
     // Init DB
     const supabase = createClient(
@@ -13,27 +29,29 @@ serve(async (req) => {
       Deno.env.get('SERVICE_ROLE_KEY')!
     )
 
-    // Auth
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing Authorization header' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
+    // Authenticate user (uses centralized error handling with CORS)
+    const { user } = await requireAuth(req, supabase)
+    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
+
+    // Safe JSON parsing with error handling
+    let body: GlobalQuestionRequest
+    try {
+      body = await req.json() as GlobalQuestionRequest
+    } catch (error) {
+      throw new ValidationError('Invalid JSON in request body')
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401 }
-      )
+    // Input validation
+    if (!body.courseId || typeof body.courseId !== 'string') {
+      throw new ValidationError('courseId is required and must be a string')
     }
 
-    const { courseId } = await req.json() as GlobalQuestionRequest
-    console.log('[next-global-question] Request:', { userId: user.id, courseId })
+    if (!isValidUUID(body.courseId)) {
+      throw new ValidationError('courseId must be a valid UUID')
+    }
+
+    const { courseId } = body
+    console.log(`[${FUNCTION_NAME}] Request:`, { userId: user.id, courseId })
 
     // STEP 1 — find weak topics
     const { data: weakTopics } = await supabase
@@ -63,10 +81,7 @@ serve(async (req) => {
     }
 
     if (targetTopicIds.length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'No topics found for this course' }),
-        { status: 404 }
-      )
+      throw new NotFoundError('No topics found for this course')
     }
 
     // STEP 2 — try spaced repetition RPC
@@ -94,54 +109,19 @@ serve(async (req) => {
         .single()
 
       if (fallbackError || !fallbackQuestion) {
-        return new Response(
-          JSON.stringify({ error: 'No questions available' }),
-          { status: 404 }
-        )
+        throw new NotFoundError('No questions available')
       }
 
-      console.log('[next-global-question] Using fallback ID:', fallbackQuestion.id)
+      console.log(`[${FUNCTION_NAME}] Using fallback ID:`, fallbackQuestion.id)
 
-      return new Response(
-        JSON.stringify(fallbackQuestion),
-        {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers':
-              'authorization, x-client-info, apikey, content-type'
-          }
-        }
-      )
+      return successResponse(fallbackQuestion)
     }
 
-    console.log('[next-global-question] Success, spaced Q ID:', question[0].id)
+    console.log(`[${FUNCTION_NAME}] Success, spaced Q ID:`, question[0].id)
 
-    return new Response(
-      JSON.stringify(question[0]),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers':
-            'authorization, x-client-info, apikey, content-type'
-        }
-      }
-    )
+    return successResponse(question[0])
 
-  } catch (error: any) {
-    console.error('[next-global-question] Error:', error)
-
-    return new Response(
-      JSON.stringify({
-        error: error?.message ?? 'Internal server error'
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    )
+  } catch (error) {
+    return handleError(error, FUNCTION_NAME)
   }
 })

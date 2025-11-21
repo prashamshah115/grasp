@@ -5,6 +5,13 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '../_shared/rate-limit.ts'
+import {
+  handleError,
+  handleCORS,
+  successResponse,
+  requireAuth,
+  ValidationError,
+} from '../_shared/errors.ts'
 
 interface RAGRequest {
   message: string
@@ -104,45 +111,48 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
 // MAIN
 // ------------------------------------------
 serve(async (req) => {
+  const FUNCTION_NAME = 'rag-chat'
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return handleCORS()
+  }
+
   try {
     const supabase = createClient(
       Deno.env.get('PUBLIC_SUPABASE_URL')!,
       Deno.env.get('SERVICE_ROLE_KEY')!
     )
 
-    // Auth
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing Authorization header' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
-    }
-
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401 }
-      )
-    }
+    // Authenticate user (uses centralized error handling with CORS)
+    const { user } = await requireAuth(req, supabase)
+    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
 
     // Rate limiting check
     const rateLimitResult = await checkRateLimit(user.id, RATE_LIMITS.rag_chat)
     if (!rateLimitResult.allowed) {
-      console.log('[rag-chat] Rate limit exceeded for user:', user.id)
+      console.log(`[${FUNCTION_NAME}] Rate limit exceeded for user:`, user.id)
       return rateLimitResponse(rateLimitResult)
     }
 
-    console.log('[rag-chat] Rate limit OK - remaining:', rateLimitResult.remaining)
+    console.log(`[${FUNCTION_NAME}] Rate limit OK - remaining:`, rateLimitResult.remaining)
 
-    // Parse request
-    const { message, topicId, courseId, questionId } =
-      await req.json() as RAGRequest
+    // Safe JSON parsing with error handling
+    let body: RAGRequest
+    try {
+      body = await req.json() as RAGRequest
+    } catch (error) {
+      throw new ValidationError('Invalid JSON in request body')
+    }
 
-    console.log('[rag-chat] Request:', {
+    // Input validation
+    if (!body.message || typeof body.message !== 'string' || body.message.trim().length === 0) {
+      throw new ValidationError('Message is required and cannot be empty')
+    }
+
+    const { message, topicId, courseId, questionId } = body
+
+    console.log(`[${FUNCTION_NAME}] Request:`, {
       userId: user.id,
       topicId,
       courseId,
@@ -185,15 +195,12 @@ serve(async (req) => {
 
     // No matching pages → fallback message
     if (!pages || pages.length === 0) {
-      return new Response(
-        JSON.stringify({
-          answer:
-            "I don't have enough context to answer this yet. Upload course materials or documents for this topic.",
-          citations: [],
-          pages: []
-        } as RAGResponse),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      )
+      return successResponse({
+        answer:
+          "I don't have enough context to answer this yet. Upload course materials or documents for this topic.",
+        citations: [],
+        pages: []
+      } as RAGResponse)
     }
 
     // ------------------------------------------
@@ -239,38 +246,16 @@ ${context}
       publicUrl: p.public_url
     }))
 
-    console.log('[rag-chat] Success')
+    console.log(`[${FUNCTION_NAME}] Success`)
 
-    // ------------------------------------------
-    // RETURN
-    // ------------------------------------------
-    return new Response(
-      JSON.stringify({
-        answer,
-        citations,
-        pages: pages.slice(0, 5)
-      } as RAGResponse),
-      {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers':
-            'authorization, x-client-info, apikey, content-type'
-        }
-      }
-    )
+    // Return success response with CORS headers
+    return successResponse({
+      answer,
+      citations,
+      pages: pages.slice(0, 5)
+    } as RAGResponse)
 
-  } catch (error: any) {
-    console.error('[rag-chat] Error:', error)
-    return new Response(
-      JSON.stringify({
-        error: error?.message ?? 'Internal server error'
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    )
+  } catch (error) {
+    return handleError(error, FUNCTION_NAME)
   }
 })
