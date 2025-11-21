@@ -73,6 +73,24 @@ export function CompressionView() {
     }
   }
 
+  const handleDownload = () => {
+    if (!notes || !selectedTopic) return
+
+    // Create markdown file content
+    const content = `# ${selectedTopic.name}\n\nCourse: ${course.name} (${course.code})\n\n---\n\n${notes.content_md}`
+
+    // Create blob and download
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${course.code}-${selectedTopic.name.replace(/[^a-z0-9]/gi, '-')}-compression-notes.md`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="flex-1 flex overflow-hidden">
       {/* Topics List - Left Pane */}
@@ -160,7 +178,11 @@ export function CompressionView() {
                     {generateCompression.isPending ? 'Generating...' : 'Regenerate'}
                   </span>
                 </button>
-                <button className="flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#10B981] text-white hover:bg-[#059669] transition-all">
+                <button
+                  onClick={handleDownload}
+                  disabled={!notes}
+                  className="flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#10B981] text-white hover:bg-[#059669] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <Download className="w-4 h-4" />
                   <span className="text-sm">Download</span>
                 </button>
