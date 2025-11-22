@@ -654,13 +654,24 @@ export async function uploadDocument(file: File, courseId: string, topicId: stri
 
   if (uploadError) handleSupabaseError(uploadError)
 
+  // Detect document type from filename
+  const detectDocType = (filename: string): string => {
+    const lower = filename.toLowerCase()
+    if (lower.includes('lecture') || lower.includes('slides')) return 'slides'
+    if (lower.includes('textbook') || lower.includes('book')) return 'textbook'
+    if (lower.includes('homework') || lower.includes('assignment')) return 'homework'
+    if (lower.includes('exam') || lower.includes('quiz') || lower.includes('test')) return 'exam'
+    if (lower.includes('notes')) return 'notes'
+    return 'other'
+  }
+
   // Create document record
   const { data, error } = await supabase
     .from('documents')
     .insert({
       course_id: courseId,
       topic_id: topicId,
-      doc_type: 'slides', // TODO: detect from file type
+      doc_type: detectDocType(file.name),
       title: file.name,
       storage_path: uploadData.path,
       total_pages: 0, // Will be updated after ingestion
