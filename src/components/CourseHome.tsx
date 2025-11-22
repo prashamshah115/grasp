@@ -22,18 +22,19 @@ import LoadingScreen from './LoadingScreen';
 export function CourseHome() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [masteryMode, setMasteryMode] = useState<'pass' | 'a-level' | 'deep'>('a-level');
 
-  // Fetch course data
+  // Fetch course data - all hooks called unconditionally (before any early returns)
   const { data: course, isLoading: courseLoading } = useCourse(courseId!);
   const { data: topics, isLoading: topicsLoading } = useTopics(courseId!);
   const { data: mastery, isLoading: masteryLoading } = useCourseMastery(
-    user?.id || '',
+    user?.id,
     courseId!
   );
 
-  const isLoading = courseLoading || topicsLoading || masteryLoading;
+  // Combine all loading states
+  const isLoading = authLoading || courseLoading || topicsLoading || masteryLoading;
 
   if (isLoading) {
     return <LoadingScreen message="Loading course..." />;

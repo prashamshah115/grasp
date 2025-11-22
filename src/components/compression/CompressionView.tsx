@@ -23,19 +23,19 @@ import { FileManagement } from '../storage/FileManagement'
 
 export function CompressionView() {
   const { courseId } = useParams<{ courseId: string }>()
-  const { user } = useAuth()
+  const { user, isLoading: authLoading } = useAuth()
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null)
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
   const [showFileManager, setShowFileManager] = useState(false)
 
-  // Fetch course and topics
+  // Fetch course and topics - all hooks called unconditionally
   const { data: course, isLoading: courseLoading } = useCourse(courseId!)
   const { data: topics, isLoading: topicsLoading } = useTopics(courseId!)
 
   // Fetch compression notes for selected topic
   const { data: notes, isLoading: notesLoading } = useCompressionNotes(
-    user?.id || '',
-    selectedTopicId || '',
+    user?.id,
+    selectedTopicId || undefined,
     {
       enabled: !!selectedTopicId && !!user?.id,
     }
@@ -44,7 +44,8 @@ export function CompressionView() {
   // Generate compression mutation
   const generateCompression = useGenerateCompression()
 
-  const isLoading = courseLoading || topicsLoading
+  // Combine all loading states
+  const isLoading = authLoading || courseLoading || topicsLoading
 
   if (isLoading) {
     return <LoadingScreen message="Loading compression view..." />

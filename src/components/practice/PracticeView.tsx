@@ -22,9 +22,9 @@ import { AIAssistant } from '../shared/AIAssistant'
 export function PracticeView() {
   const { courseId } = useParams<{ courseId: string }>()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, isLoading: authLoading } = useAuth()
 
-  // Fetch course data with React Query
+  // Fetch course data with React Query - all hooks called unconditionally
   const { data: course, isLoading: courseLoading } = useCourse(courseId!)
 
   // Fetch topics for this course
@@ -32,14 +32,15 @@ export function PracticeView() {
 
   // Fetch mastery data
   const { data: mastery, isLoading: masteryLoading } = useCourseMastery(
-    user?.id || '',
+    user?.id,
     courseId!
   )
 
   // Start session mutation
   const startSession = useStartSession()
 
-  const isLoading = courseLoading || topicsLoading || masteryLoading
+  // Combine all loading states
+  const isLoading = authLoading || courseLoading || topicsLoading || masteryLoading
 
   if (isLoading) {
     return <LoadingScreen message="Loading practice view..." />

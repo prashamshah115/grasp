@@ -31,6 +31,7 @@ export function CourseCatalog() {
   const uploadCourseMaterial = useUploadCourseMaterial();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
 
   const isLoading = coursesLoading || userCoursesLoading;
 
@@ -55,8 +56,6 @@ export function CourseCatalog() {
       console.error('Failed to add course:', error);
     }
   };
-
-  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
 
   const handleUploadClick = () => {
     // Check if user has enrolled courses
