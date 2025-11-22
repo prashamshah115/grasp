@@ -1,19 +1,35 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Minimize2, Maximize2 } from 'lucide-react';
+import { Sparkles, X, Send, Minimize2, Maximize2, Loader2 } from 'lucide-react';
+import { useParams } from 'react-router-dom';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { useRAGChat } from '@/hooks/useRAGChat';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  citations?: string[];
+  pages?: Array<{ doc_title: string; page_number: number }>;
 }
 
 interface AIAssistantProps {
-  context?: string; // Current question or topic context
+  context?: string; // Current question or topic context (for display only)
+  topicId?: string; // Topic ID for RAG context
+  courseId?: string; // Course ID for RAG context
   placeholder?: string;
 }
 
-export function AIAssistant({ context, placeholder = 'Ask me anything about this material...' }: AIAssistantProps) {
+export function AIAssistant({ 
+  context, 
+  topicId, 
+  courseId,
+  placeholder = 'Ask me anything about this material...' 
+}: AIAssistantProps) {
+  const { courseId: urlCourseId } = useParams<{ courseId?: string }>();
+  const { user } = useAuth();
+  const chatMutation = useRAGChat();
+  
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -31,8 +47,8 @@ export function AIAssistant({ context, placeholder = 'Ask me anything about this
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
+  const handleSend = async () => {
+    if (!inputValue.trim() || !user) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -41,39 +57,38 @@ export function AIAssistant({ context, placeholder = 'Ask me anything about this
       timestamp: new Date()
     };
 
-    setMessages([...messages, userMessage]);
+    setMessages(prev => [...prev, userMessage]);
+    const messageText = inputValue;
+    setInputValue('');
 
-    // Simulate AI response
-    setTimeout(() => {
+    // Call real RAG API
+    try {
+      const response = await chatMutation.mutateAsync({
+        user_id: user.id,
+        topic_id: topicId || '',
+        course_id: courseId || urlCourseId || '',
+        message: messageText,
+      });
+
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: generateAIResponse(inputValue, context),
+        content: response.answer,
+        citations: response.citations,
+        pages: response.pages,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiMessage]);
-    }, 800);
-
-    setInputValue('');
-  };
-
-  const generateAIResponse = (question: string, ctx?: string): string => {
-    // Mock AI responses - in production, this would call an actual AI API
-    const responses = [
-      'Great question! Let me break this down for you step by step...',
-      'Here\'s a helpful way to think about this concept...',
-      'This is a common area of confusion. The key insight is...',
-      'Let me explain this using a real-world analogy...',
-      'To solve this type of problem, try this approach...'
-    ];
-    
-    const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-    
-    if (ctx) {
-      return `${randomResponse}\n\nContext: ${ctx}\n\nBased on your question about "${question}", here's what you need to know:\n\n1. First, understand the core concept\n2. Then, apply it to the specific problem\n3. Finally, verify your solution makes sense\n\nWould you like me to elaborate on any of these steps?`;
+    } catch (error) {
+      console.error('RAG chat error:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'Sorry, I encountered an error processing your message. Please try again.',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
     }
-    
-    return `${randomResponse}\n\nRegarding "${question}":\n\nThis involves understanding the fundamental principles and applying them systematically. Let me know if you'd like more detail on any part!`;
   };
 
   if (!isOpen) {
@@ -158,6 +173,16 @@ export function AIAssistant({ context, placeholder = 'Ask me anything about this
               <div className="text-sm leading-relaxed whitespace-pre-wrap">
                 {message.content}
               </div>
+              {message.citations && message.citations.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-[#E5E7EB]">
+                  <div className="text-xs text-[#6B7280] font-medium mb-1">Sources:</div>
+                  <div className="text-xs text-[#9CA3AF] space-y-1">
+                    {message.citations.map((citation, idx) => (
+                      <div key={idx}>{citation}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className={`text-xs mt-2 ${
                 message.role === 'user' ? 'text-white/60' : 'text-[#9CA3AF]'
               }`}>
@@ -182,10 +207,14 @@ export function AIAssistant({ context, placeholder = 'Ask me anything about this
           />
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() || chatMutation.isPending}
             className="w-12 h-12 bg-[#4F46E5] text-white rounded-[12px] flex items-center justify-center hover:bg-[#4338CA] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Send className="w-5 h-5" />
+            {chatMutation.isPending ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <Send className="w-5 h-5" />
+            )}
           </button>
         </div>
         <div className="mt-3 flex gap-2 flex-wrap">

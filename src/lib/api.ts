@@ -519,6 +519,7 @@ export async function ragChat(request: RAGChatRequest): Promise<RAGChatResponse>
       body: {
         message: request.message,
         topicId: request.topic_id,
+        courseId: request.course_id,
         questionId: request.question_id,
       },
     })

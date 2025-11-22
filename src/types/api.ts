@@ -20,6 +20,7 @@ export interface IngestDocumentResponse {
 export interface RAGChatRequest {
   user_id: string
   topic_id: string
+  course_id?: string
   question_id?: string
   message: string
 }

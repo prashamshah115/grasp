@@ -54,14 +54,23 @@
             "zustand": "^5.0.8"
       },
       "devDependencies": {
+            "@playwright/test": "^1.48.0",
             "@trigger.dev/build": "^4.1.1",
             "@types/node": "^20.10.0",
             "@vitejs/plugin-react-swc": "^3.10.2",
+            "dotenv": "^17.2.3",
+            "tsx": "^4.20.6",
             "vite": "6.3.5"
       },
       "scripts": {
             "dev": "vite",
             "build": "vite build",
-            "health-check": "vite-node src/lib/health-check.ts"
+            "health-check": "vite-node src/lib/health-check.ts",
+            "test:e2e": "playwright test",
+            "test:e2e:ui": "playwright test --ui",
+            "test:e2e:headed": "playwright test --headed",
+            "test:e2e:debug": "playwright test --debug",
+            "test:setup": "playwright test tests/fixtures/auth.setup.ts",
+            "test:update-data": "tsx scripts/update-tests-for-real-data.ts"
       }
 }

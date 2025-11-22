@@ -244,6 +244,8 @@ export function CompressionView() {
         context={`Course: ${course.code} - Compression Mode - Topic: ${
           selectedTopic?.name || 'None selected'
         }`}
+        courseId={courseId!}
+        topicId={selectedTopicId || undefined}
       />
 
       {/* Upload Modal */}
