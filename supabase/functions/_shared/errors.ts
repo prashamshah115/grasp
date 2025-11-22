@@ -14,6 +14,8 @@
  *   })
  */
 
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
 // ==================== ERROR TYPES ====================
 
 export class AppError extends Error {
@@ -159,27 +161,47 @@ export function successResponse<T>(data: T, status: number = 200): Response {
 
 /**
  * Extract and validate user from request
+ * Creates Supabase client with proper Authorization header for Supabase v2
+ * Returns authenticated client and user for use in edge functions
+ * 
+ * CORRECT PATTERN for Supabase v2 Edge Functions:
+ * - Create client with SERVICE_ROLE_KEY
+ * - Set Authorization header in global.headers
+ * - Call getUser() without token (client uses header automatically)
+ * 
  * Throws AuthenticationError if invalid
  */
 export async function requireAuth(
-  req: Request,
-  supabase: any
-): Promise<{ user: any; token: string }> {
+  req: Request
+): Promise<{ supabase: any; user: any }> {
   const authHeader = req.headers.get('Authorization')
 
   if (!authHeader) {
     throw new AuthenticationError('Missing Authorization header')
   }
 
-  const token = authHeader.replace('Bearer ', '')
+  // Create Supabase client with Authorization header in global config
+  // This is the CORRECT pattern for Supabase v2 Edge Functions
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') || Deno.env.get('PUBLIC_SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SERVICE_ROLE_KEY')!,
+    {
+      global: {
+        headers: { Authorization: authHeader },
+      },
+    }
+  )
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+  // Call getUser() without token - client automatically uses Authorization header
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
 
   if (authError || !user) {
     throw new AuthenticationError('Invalid or expired token')
   }
 
-  return { user, token }
+  // Return both client and user
+  // The client has proper user context and will work with RLS policies
+  return { supabase, user }
 }
 
 // ==================== VALIDATION HELPERS ====================

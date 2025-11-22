@@ -141,3 +141,49 @@ SELECT 'Questions inserted:' as info, COUNT(*) as count FROM questions WHERE cou
 
 SELECT 'Exams inserted:' as info, COUNT(*) as count FROM exams WHERE course_id = '11111111-1111-1111-1111-111111111111';
 
+-- ==========================================
+-- ADDITIONAL TEST DATA FOR QA TESTING
+-- ==========================================
+
+-- Note: Test users should be created via Supabase Auth API or qa/test-data-generator.js
+-- This SQL file focuses on course/content data
+
+-- Add more questions for better test coverage
+INSERT INTO questions (id, course_id, topic_id, q_type, prompt, options, correct_answer, explanation, difficulty, created_at)
+VALUES
+  (
+    'qqqqqqqq-6666-6666-6666-666666666666',
+    '11111111-1111-1111-1111-111111111111',
+    'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    'multiple_choice',
+    'What is context switching?',
+    '{"A": "Switching between processes", "B": "Switching CPU registers", "C": "Switching memory pages", "D": "Both A and B"}'::jsonb,
+    '"D"'::jsonb,
+    'Context switching involves saving the state of one process and loading another, including CPU registers.',
+    2,
+    NOW()
+  ),
+  (
+    'qqqqqqqq-7777-7777-7777-777777777777',
+    '11111111-1111-1111-1111-111111111111',
+    'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+    'multiple_choice',
+    'What is a deadlock?',
+    '{"A": "Two processes waiting for each other", "B": "A process that never terminates", "C": "A memory leak", "D": "A race condition"}'::jsonb,
+    '"A"'::jsonb,
+    'A deadlock occurs when two or more processes are waiting for resources held by each other.',
+    3,
+    NOW()
+  )
+ON CONFLICT (id) DO NOTHING;
+
+-- Add more exam questions
+INSERT INTO exam_questions (exam_id, question_id, order_index, points)
+VALUES
+  ('exxxxxxx-1111-1111-1111-111111111111', 'qqqqqqqq-6666-6666-6666-666666666666', 5, 1),
+  ('exxxxxxx-1111-1111-1111-111111111111', 'qqqqqqqq-7777-7777-7777-777777777777', 6, 2)
+ON CONFLICT DO NOTHING;
+
+-- Summary
+SELECT 'Total questions:' as info, COUNT(*) as count FROM questions WHERE course_id = '11111111-1111-1111-1111-111111111111';
+

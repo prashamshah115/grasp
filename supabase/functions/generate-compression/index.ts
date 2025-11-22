@@ -1,5 +1,4 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '../_shared/rate-limit.ts'
 import {
   handleError,
@@ -61,13 +60,9 @@ serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get('PUBLIC_SUPABASE_URL')!,
-      Deno.env.get('SERVICE_ROLE_KEY')!
-    )
-
-    // Authenticate user (uses centralized error handling with CORS)
-    const { user } = await requireAuth(req, supabase)
+    // Authenticate user and get properly configured Supabase client
+    // This uses the CORRECT Supabase v2 pattern for Edge Functions
+    const { supabase, user } = await requireAuth(req)
     console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
 
     // Rate limiting check

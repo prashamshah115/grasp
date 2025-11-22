@@ -20,7 +20,6 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   handleError,
   handleCORS,
@@ -79,14 +78,9 @@ serve(async (req) => {
   try {
     console.log(`[${FUNCTION_NAME}] Request received`)
 
-    // Initialize Supabase client with service role
-    const supabase = createClient(
-      Deno.env.get('PUBLIC_SUPABASE_URL')!,
-      Deno.env.get('SERVICE_ROLE_KEY')!
-    )
-
-    // Authenticate user
-    const { user } = await requireAuth(req, supabase)
+    // Authenticate user and get properly configured Supabase client
+    // This uses the CORRECT Supabase v2 pattern for Edge Functions
+    const { supabase, user } = await requireAuth(req)
     console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
 
     // Parse and validate request body
