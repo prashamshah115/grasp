@@ -17,8 +17,18 @@ import { useState, useEffect } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Download, X, Loader2 } from 'lucide-react'
 
-// Configure PDF.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+// Configure PDF.js worker - use CDN for Vite compatibility
+// Only configure in browser environment
+if (typeof window !== 'undefined') {
+  try {
+    if (pdfjs?.GlobalWorkerOptions && !pdfjs.GlobalWorkerOptions.workerSrc) {
+      pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+    }
+  } catch (error) {
+    // Silently fail - worker will be configured when component mounts if needed
+    console.warn('PDF.js worker configuration skipped:', error)
+  }
+}
 
 interface PDFViewerProps {
   url: string
