@@ -232,7 +232,12 @@ export function MultiStepExamSimulation({
       />
 
       {/* AI Assistant - Always Available */}
-      <AIAssistant context={aiContext} placeholder="Ask about this question..." />
+      <AIAssistant 
+        context={aiContext} 
+        placeholder="Ask about this question..."
+        questionId={currentQuestion.id}
+        mode="exam"
+      />
     </div>
   );
 }

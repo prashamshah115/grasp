@@ -17,6 +17,8 @@ interface AIAssistantProps {
   context?: string; // Current question or topic context (for display only)
   topicId?: string; // Topic ID for RAG context
   courseId?: string; // Course ID for RAG context
+  questionId?: string; // Question ID for RAG context (practice/exam questions)
+  mode?: 'practice' | 'exam' | 'compression' | 'general'; // Current app mode for context-aware prompts
   placeholder?: string;
 }
 
@@ -24,7 +26,9 @@ export function AIAssistant({
   context, 
   topicId, 
   courseId,
-  placeholder = 'Ask me anything about this material...' 
+  questionId,
+  mode = 'general',
+  placeholder 
 }: AIAssistantProps) {
   const { courseId: urlCourseId } = useParams<{ courseId?: string }>();
   const { user } = useAuth();
@@ -32,16 +36,81 @@ export function AIAssistant({
   
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
+  
+  // Context-aware initial greeting
+  const getInitialGreeting = () => {
+    switch (mode) {
+      case 'practice':
+        return '👋 Hi! I\'m here to help with your practice questions. I can explain concepts, break down problems step-by-step, or give you hints without spoiling the answer. What would you like help with?';
+      case 'exam':
+        return '👋 Exam mode! I can help clarify concepts and guide your thinking, but I\'ll let you work through the problems yourself. What would you like to understand better?';
+      case 'compression':
+        return '👋 Ready to help you understand the compression notes! I can explain concepts in detail, clarify confusing parts, or help you connect ideas. What would you like to explore?';
+      default:
+        return '👋 Hi! I\'m your AI study assistant. I can help explain concepts, break down problems, or guide you through solutions. What would you like to know?';
+    }
+  };
+  
+  // Context-aware placeholder
+  const getPlaceholder = () => {
+    if (placeholder) return placeholder;
+    switch (mode) {
+      case 'practice':
+        return 'Ask about this question or concept...';
+      case 'exam':
+        return 'Ask for clarification (I won\'t give answers)...';
+      case 'compression':
+        return 'Ask me to explain any concept in detail...';
+      default:
+        return 'Ask me anything about this material...';
+    }
+  };
+  
+  // Context-aware prompt suggestions
+  const getPromptSuggestions = () => {
+    const basePrompts = [
+      { text: 'Explain this step by step', icon: '💡' },
+      { text: 'What am I missing?', icon: '🤔' },
+      { text: 'Give me a hint', icon: '🎯' },
+    ];
+    
+    switch (mode) {
+      case 'practice':
+        return [
+          { text: 'Explain this concept from the ground up', icon: '📚' },
+          { text: 'Walk me through solving this step-by-step', icon: '🔍' },
+          { text: 'What\'s the key insight here?', icon: '💡' },
+          { text: 'Give me a hint without the answer', icon: '🎯' },
+        ];
+      case 'exam':
+        return [
+          { text: 'Clarify this concept', icon: '📖' },
+          { text: 'What should I remember here?', icon: '🧠' },
+          { text: 'Explain the underlying principle', icon: '🔬' },
+        ];
+      case 'compression':
+        return [
+          { text: 'Explain this concept in detail', icon: '📖' },
+          { text: 'How does this relate to other topics?', icon: '🔗' },
+          { text: 'Give me examples of this', icon: '💡' },
+          { text: 'What are common mistakes here?', icon: '⚠️' },
+        ];
+      default:
+        return basePrompts;
+    }
+  };
+  
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: '👋 Hi! I\'m your AI study assistant. I can help explain concepts, break down problems, or guide you through solutions. What would you like to know?',
+      content: getInitialGreeting(),
       timestamp: new Date()
     }
   ]);
   const [inputValue, setInputValue] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const promptSuggestions = getPromptSuggestions();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -61,12 +130,13 @@ export function AIAssistant({
     const messageText = inputValue;
     setInputValue('');
 
-    // Call real RAG API
+    // Call real RAG API with full context
     try {
       const response = await chatMutation.mutateAsync({
         user_id: user.id,
         topic_id: topicId || '',
         course_id: courseId || urlCourseId || '',
+        question_id: questionId || '',
         message: messageText,
       });
 
@@ -202,7 +272,7 @@ export function AIAssistant({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={placeholder}
+            placeholder={getPlaceholder()}
             className="flex-1 px-4 py-3 border border-[#E5E7EB] rounded-[12px] text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent"
           />
           <button
@@ -218,24 +288,15 @@ export function AIAssistant({
           </button>
         </div>
         <div className="mt-3 flex gap-2 flex-wrap">
-          <button
-            onClick={() => setInputValue('Explain this step by step')}
-            className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors"
-          >
-            💡 Explain step by step
-          </button>
-          <button
-            onClick={() => setInputValue('What am I missing?')}
-            className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors"
-          >
-            🤔 What am I missing?
-          </button>
-          <button
-            onClick={() => setInputValue('Give me a hint')}
-            className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors"
-          >
-            🎯 Give me a hint
-          </button>
+          {promptSuggestions.slice(0, 3).map((prompt, idx) => (
+            <button
+              key={idx}
+              onClick={() => setInputValue(prompt.text)}
+              className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors"
+            >
+              {prompt.icon} {prompt.text}
+            </button>
+          ))}
         </div>
       </div>
     </div>

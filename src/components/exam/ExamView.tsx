@@ -19,7 +19,7 @@ import { useAuth } from '@/components/auth/AuthProvider'
 import LoadingScreen from '../LoadingScreen'
 import { AIAssistant } from '../shared/AIAssistant'
 import { useQuery } from '@tanstack/react-query'
-import { fetchExams, fetchUserExamSessions } from '@/lib/api'
+import { fetchExams, fetchUserExamSessions, getActiveExamSessions } from '@/lib/api'
 import { queryKeys } from '@/lib/queryClient'
 
 export function ExamView() {
@@ -44,12 +44,24 @@ export function ExamView() {
     enabled: !!user,
   })
 
+  // Fetch active exam sessions for resumption
+  const { data: activeSessions, isLoading: activeSessionsLoading } = useQuery({
+    queryKey: ['activeExamSessions', courseId, user?.id],
+    queryFn: () => getActiveExamSessions(courseId!),
+    enabled: !!courseId && !!user,
+  })
+
   // Filter sessions for exams in this course
   const pastSessions = allSessions?.filter((session: any) =>
     exams?.some(exam => exam.id === session.exam_id)
   ) || []
 
-  const isLoading = courseLoading || examsLoading
+  // Create map of exam_id -> active session for quick lookup
+  const activeSessionMap = new Map(
+    activeSessions?.map((session: any) => [session.exam_id, session]) || []
+  )
+
+  const isLoading = courseLoading || examsLoading || activeSessionsLoading
 
   if (isLoading) {
     return <LoadingScreen message="Loading exams..." />
@@ -66,6 +78,11 @@ export function ExamView() {
   const handleStartExam = (examId: string) => {
     // Navigate to exam definition page
     navigate(`/exam/${examId}`)
+  }
+
+  const handleResumeExam = (sessionId: string) => {
+    // Navigate directly to exam session
+    navigate(`/exam-session/${sessionId}`)
   }
 
   return (
@@ -110,12 +127,28 @@ export function ExamView() {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => handleStartExam(exam.id)}
-                    className="bg-white text-[#F59E0B] px-8 py-4 rounded-[12px] font-medium hover:bg-[#F9FAFB] transition-all shadow-lg"
-                  >
-                    Start Exam
-                  </button>
+                  {(() => {
+                    const activeSession = activeSessionMap.get(exam.id)
+                    if (activeSession) {
+                      return (
+                        <button
+                          onClick={() => handleResumeExam(activeSession.id)}
+                          className="bg-[#10B981] text-white px-8 py-4 rounded-[12px] font-medium hover:bg-[#059669] transition-all shadow-lg flex items-center gap-2"
+                        >
+                          <Clock className="w-4 h-4" />
+                          Resume Exam
+                        </button>
+                      )
+                    }
+                    return (
+                      <button
+                        onClick={() => handleStartExam(exam.id)}
+                        className="bg-white text-[#F59E0B] px-8 py-4 rounded-[12px] font-medium hover:bg-[#F9FAFB] transition-all shadow-lg"
+                      >
+                        Start Exam
+                      </button>
+                    )
+                  })()}
                 </div>
               </div>
             ))}
@@ -236,7 +269,11 @@ export function ExamView() {
       </div>
 
       {/* AI Assistant */}
-      <AIAssistant context={`Course: ${course.code} - Exam Mode`} />
+      <AIAssistant 
+        context={`Course: ${course.code} - Exam Mode`}
+        courseId={courseId}
+        mode="exam"
+      />
     </div>
   )
 }

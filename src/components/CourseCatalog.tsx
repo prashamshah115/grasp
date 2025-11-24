@@ -50,10 +50,30 @@ export function CourseCatalog() {
 
   const handleAddCourse = async (courseId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    
+    // Optimistic UI: disable button immediately
+    const button = e.currentTarget as HTMLButtonElement;
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Enrolling...';
+    
     try {
       await addCourse.mutateAsync(courseId);
-    } catch (error) {
-      console.error('Failed to add course:', error);
+      // Success - button will be disabled by "Already enrolled" state
+    } catch (error: any) {
+      // Handle duplicate enrollment gracefully
+      if (error?.code === '23505' || 
+          error?.message?.includes('duplicate') || 
+          error?.message?.includes('unique')) {
+        // Already enrolled - this is fine, just show success state
+        console.log('Already enrolled in course');
+      } else {
+        console.error('Failed to add course:', error);
+        // Restore button on error
+        button.disabled = false;
+        button.textContent = originalText;
+        alert('Failed to enroll in course. Please try again.');
+      }
     }
   };
 

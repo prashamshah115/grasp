@@ -172,6 +172,7 @@ export function PracticeView() {
       <AIAssistant 
         context={`Course: ${course.code} - Practice Mode`}
         courseId={courseId!}
+        mode="practice"
       />
     </div>
   );

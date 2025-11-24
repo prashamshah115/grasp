@@ -73,6 +73,14 @@
             "test:e2e:headed": "playwright test --headed",
             "test:e2e:debug": "playwright test --debug",
             "test:setup": "playwright test tests/fixtures/auth.setup.ts",
-            "test:update-data": "tsx scripts/update-tests-for-real-data.ts"
+            "test:update-data": "tsx scripts/update-tests-for-real-data.ts",
+            "test:backend": "bash scripts/test-backend.sh",
+            "test:backend:unit": "deno test tests/backend/unit/ --allow-net --allow-env",
+            "test:backend:integration": "deno test tests/backend/integration/ --allow-net --allow-env",
+            "test:backend:database": "deno test tests/backend/database/ --allow-net --allow-env",
+            "test:backend:security": "deno test tests/backend/security/ --allow-net --allow-env",
+            "test:backend:performance": "deno test tests/backend/performance/ --allow-net --allow-env",
+            "test:backend:watch": "deno test --watch tests/backend/ --allow-net --allow-env",
+            "test:backend:coverage": "deno test --coverage tests/backend/ --allow-net --allow-env"
       }
 }

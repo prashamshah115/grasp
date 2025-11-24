@@ -327,6 +327,7 @@ export function CompressionView() {
         }`}
         courseId={courseId!}
         topicId={selectedTopicId || undefined}
+        mode="compression"
       />
 
       {/* Upload Modal */}

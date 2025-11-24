@@ -311,6 +311,7 @@ export function ExamSimulation() {
               <ExamTimer
                 durationMinutes={session.exam.duration_minutes}
                 startTime={new Date(session.started_at)}
+                timeRemainingSec={session.time_remaining_sec}
                 onTimeUp={handleTimeUp}
               />
               <button

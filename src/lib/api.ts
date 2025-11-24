@@ -11,6 +11,7 @@
 
 import { supabase } from './supabase'
 import { retryWithBackoff, handleSupabaseError, AuthError, ValidationError } from './errors'
+import { safeInvoke } from './safeInvoke'
 import type {
   Database,
   RAGChatRequest,
@@ -336,6 +337,36 @@ export async function fetchExamSession(sessionId: string) {
 }
 
 /**
+ * ✅ IMPLEMENTED: Get active exam sessions for a course
+ * Used for exam resumption feature
+ */
+export async export async function getActiveExamSessions(courseId: string) {
+  const user = await requireAuth()
+
+  const { data, error } = await supabase
+    .from('exam_sessions')
+    .select(`
+      id,
+      exam_id,
+      started_at,
+      time_remaining_sec,
+      is_completed,
+      exams!inner(
+        id,
+        name,
+        course_id
+      )
+    `)
+    .eq('user_id', user.id)
+    .eq('exams.course_id', courseId)
+    .eq('is_completed', false)
+    .order('started_at', { ascending: false })
+
+  if (error) handleSupabaseError(error)
+  return data || []
+}
+
+/**
  * ✅ NEW: Fetch full exam session with questions and metadata
  * Used for loading existing exam sessions (e.g., on page refresh)
  * Returns questions WITHOUT correct answers for security
@@ -420,12 +451,20 @@ export async function fetchExamSessionWithQuestions(
     // correct_answer intentionally omitted for security
   })) || []
 
-  // Calculate time remaining
+  // Use time_remaining_sec from database (for resuming exams)
+  // If not available, calculate from started_at
   const startedAt = new Date(session.started_at)
-  const durationMs = exam.duration_min * 60 * 1000
-  const endsAt = new Date(startedAt.getTime() + durationMs)
-  const timeRemainingMs = endsAt.getTime() - Date.now()
-  const timeRemainingSec = Math.max(0, Math.floor(timeRemainingMs / 1000))
+  let timeRemainingSec = session.time_remaining_sec
+  
+  if (timeRemainingSec === null || timeRemainingSec === undefined) {
+    // Calculate from start time
+    const durationMs = exam.duration_min * 60 * 1000
+    const endsAt = new Date(startedAt.getTime() + durationMs)
+    const timeRemainingMs = endsAt.getTime() - Date.now()
+    timeRemainingSec = Math.max(0, Math.floor(timeRemainingMs / 1000))
+  }
+  
+  const endsAt = new Date(startedAt.getTime() + timeRemainingSec * 1000)
 
   return {
     session_id: session.id,
@@ -458,21 +497,14 @@ export async function createExamSession(
 ): Promise<CreateExamSessionResponse> {
   const user = await requireAuth()
 
-  return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke<CreateExamSessionResponse>(
-      'start-exam-session',
-      {
-        body: {
-          exam_id: request.exam_id,
-        },
-      }
-    )
-
-    if (error) throw error
-    if (!data) throw new Error('No data returned from start-exam-session')
-
-    return data
-  })
+  return safeInvoke<CreateExamSessionResponse>(
+    'start-exam-session',
+    {
+      body: {
+        exam_id: request.exam_id,
+      },
+    }
+  )
 }
 
 /**
@@ -488,21 +520,14 @@ export async function createExamSession(
 export async function submitExam(request: SubmitExamRequest): Promise<SubmitExamResponse> {
   const user = await requireAuth()
 
-  return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke<SubmitExamResponse>(
-      'submit-exam',
-      {
-        body: {
-          session_id: request.session_id,
-        },
-      }
-    )
-
-    if (error) throw error
-    if (!data) throw new Error('No data returned from submit-exam')
-
-    return data
-  })
+  return safeInvoke<SubmitExamResponse>(
+    'submit-exam',
+    {
+      body: {
+        session_id: request.session_id,
+      },
+    }
+  )
 }
 
 // ==================== EDGE FUNCTIONS ====================
@@ -514,21 +539,17 @@ export async function submitExam(request: SubmitExamRequest): Promise<SubmitExam
 export async function ragChat(request: RAGChatRequest): Promise<RAGChatResponse> {
   const user = await requireAuth()
 
-  return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke<RAGChatResponse>('rag-chat', {
+  return safeInvoke<RAGChatResponse>(
+    'rag-chat',
+    {
       body: {
         message: request.message,
         topicId: request.topic_id,
         courseId: request.course_id,
         questionId: request.question_id,
       },
-    })
-
-    if (error) throw error
-    if (!data) throw new Error('No data returned from rag-chat')
-
-    return data
-  })
+    }
+  )
 }
 
 /**
@@ -540,21 +561,14 @@ export async function getNextGlobalQuestion(
 ): Promise<NextGlobalQuestionResponse> {
   const user = await requireAuth()
 
-  return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke<NextGlobalQuestionResponse>(
-      'next-global-question',
-      {
-        body: {
-          courseId: request.course_id,
-        },
-      }
-    )
-
-    if (error) throw error
-    if (!data) throw new Error('No question available')
-
-    return data
-  })
+  return safeInvoke<NextGlobalQuestionResponse>(
+    'next-global-question',
+    {
+      body: {
+        courseId: request.course_id,
+      },
+    }
+  )
 }
 
 /**
@@ -566,22 +580,15 @@ export async function updateQuestionHistory(
 ): Promise<UpdateQuestionHistoryResponse> {
   const user = await requireAuth()
 
-  return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke<UpdateQuestionHistoryResponse>(
-      'update-question-history',
-      {
-        body: {
-          questionId: request.question_id,
-          isCorrect: request.is_correct,
-        },
-      }
-    )
-
-    if (error) throw error
-    if (!data) throw new Error('Failed to update question history')
-
-    return data
-  })
+  return safeInvoke<UpdateQuestionHistoryResponse>(
+    'update-question-history',
+    {
+      body: {
+        questionId: request.question_id,
+        isCorrect: request.is_correct,
+      },
+    }
+  )
 }
 
 /**
@@ -593,21 +600,14 @@ export async function generateCompression(
 ): Promise<GenerateCompressionResponse> {
   const user = await requireAuth()
 
-  return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke<GenerateCompressionResponse>(
-      'generate-compression',
-      {
-        body: {
-          topicId: request.topic_id,
-        },
-      }
-    )
-
-    if (error) throw error
-    if (!data) throw new Error('Failed to generate compression')
-
-    return data
-  })
+  return safeInvoke<GenerateCompressionResponse>(
+    'generate-compression',
+    {
+      body: {
+        topicId: request.topic_id,
+      },
+    }
+  )
 }
 
 /**
@@ -615,21 +615,14 @@ export async function generateCompression(
  * Calculates mastery level based on session performance
  */
 export async function updateMastery(request: UpdateMasteryRequest): Promise<UpdateMasteryResponse> {
-  return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke<UpdateMasteryResponse>(
-      'update-mastery',
-      {
-        body: {
-          sessionId: request.session_id,
-        },
-      }
-    )
-
-    if (error) throw error
-    if (!data) throw new Error('Failed to update mastery')
-
-    return data
-  })
+  return safeInvoke<UpdateMasteryResponse>(
+    'update-mastery',
+    {
+      body: {
+        sessionId: request.session_id,
+      },
+    }
+  )
 }
 
 // ==================== DOCUMENT UPLOAD ====================
@@ -690,14 +683,12 @@ export async function uploadDocument(file: File, courseId: string, topicId: stri
  * Calls Edge Function to process PDF
  */
 export async function ingestDocument(documentId: string) {
-  return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke('trigger-ingest', {
+  return safeInvoke(
+    'trigger-ingest',
+    {
       body: { document_id: documentId },
-    })
-
-    if (error) throw error
-    return data
-  })
+    }
+  )
 }
 
 // ==================== USER COURSES ====================
@@ -732,7 +723,25 @@ export async function addUserCourse(courseId: string) {
     .select()
     .single()
 
-  if (error) handleSupabaseError(error)
+  // Handle duplicate enrollment gracefully
+  if (error) {
+    // Check if it's a unique constraint violation (23505)
+    if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+      // User is already enrolled - return existing enrollment
+      const { data: existing } = await supabase
+        .from('user_courses')
+        .select()
+        .eq('user_id', user.id)
+        .eq('course_id', courseId)
+        .single()
+      
+      if (existing) {
+        return existing // Return existing enrollment (idempotent)
+      }
+    }
+    handleSupabaseError(error)
+  }
+  
   return data
 }
 
@@ -835,17 +844,19 @@ export async function uploadCourseMaterial(file: File, courseId: string) {
   }
 
   // Trigger background ingestion
-  const { error: triggerError } = await supabase.functions.invoke('trigger-ingest', {
-    body: {
-      document_id: document.id
-    }
-  })
-
-  if (triggerError) {
+  try {
+    await safeInvoke('trigger-ingest', {
+      body: {
+        document_id: document.id
+      }
+    })
+  } catch (triggerError) {
     console.error('Failed to trigger ingestion:', triggerError)
     // Don't throw - upload succeeded, ingestion can be retried
-  } else if (upload) {
-    // Update course_uploads with processed status
+  }
+  
+  // Update course_uploads with processed status if upload record exists
+  if (upload) {
     await supabase
       .from('course_uploads')
       .update({ processed: true, processed_at: new Date().toISOString() })
