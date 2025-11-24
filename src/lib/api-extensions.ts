@@ -189,7 +189,7 @@ export async function fetchExamAnswers(sessionId: string) {
 export async function fetchUserExamSessions(userId: string, examId?: string) {
   let query = supabase
     .from('exam_sessions')
-    .select('*, exams(title, course_id, duration_minutes)')
+    .select('*, exams(name, course_id, duration_min)')
     .eq('user_id', userId)
     .order('started_at', { ascending: false })
     .limit(20)

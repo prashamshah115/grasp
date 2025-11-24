@@ -39,6 +39,7 @@ export interface RAGChatResponse {
 export interface NextGlobalQuestionRequest {
   user_id: string
   course_id: string
+  weak_only?: boolean
 }
 
 export type NextGlobalQuestionResponse = Database['public']['Tables']['questions']['Row']

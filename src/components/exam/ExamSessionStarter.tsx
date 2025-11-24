@@ -60,20 +60,31 @@ export function ExamSessionStarter() {
       })
     } catch (err: any) {
       console.error('Failed to create exam session:', err)
+      console.error('Error details:', {
+        message: err.message,
+        context: err.context,
+        code: err.code,
+        status: err.status,
+      })
 
+      // Check if it's a 409 Conflict (active session exists)
+      const status = err.context?.status || err.status
+      
       // Handle specific error cases
-      if (err.message?.includes('409') || err.message?.toLowerCase().includes('conflict')) {
+      if (status === 409 || err.message?.includes('409') || err.message?.toLowerCase().includes('conflict')) {
         setError(
-          'You already have an active exam session for this exam. Please complete or cancel your existing session before starting a new one.'
+          'You already have an active exam session for this exam. Please wait a moment and try again, or contact support if the issue persists.'
         )
-      } else if (err.message?.includes('403') || err.message?.toLowerCase().includes('forbidden')) {
+      } else if (status === 403 || err.message?.includes('403') || err.message?.toLowerCase().includes('forbidden')) {
         setError(
           'You are not enrolled in this course or do not have permission to take this exam.'
         )
-      } else if (err.message?.includes('404') || err.message?.toLowerCase().includes('not found')) {
+      } else if (status === 404 || err.message?.includes('404') || err.message?.toLowerCase().includes('not found')) {
         setError('This exam could not be found. It may have been deleted.')
       } else {
-        setError(err.message || 'Failed to start exam session. Please try again.')
+        // Show the actual error message from the edge function
+        const errorMsg = err.message || err.msg || 'Failed to start exam session. Please try again.'
+        setError(`Error: ${errorMsg}`)
       }
     }
   }

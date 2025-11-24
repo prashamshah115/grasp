@@ -61,9 +61,12 @@ export function CourseHome() {
     navigate('/courses');
   };
 
-  const handleStartPractice = (mode?: string) => {
-    // Navigate to practice pillar - the practice view will handle mode selection
-    navigate(`/course/${courseId}/practice`);
+  const handleStartPractice = (mode?: { id: string; route: string }) => {
+    if (mode?.route) {
+      navigate(`/course/${courseId}/${mode.route}`);
+    } else {
+      navigate(`/course/${courseId}/practice`);
+    }
   };
 
   const handleViewCheatsheet = () => {
@@ -74,14 +77,14 @@ export function CourseHome() {
     navigate(`/course/${courseId}/compression`);
   };
   const practiceModesRow1 = [
-    { id: 'quick-recall', icon: Zap, title: 'Quick Recall', desc: 'Instant warmup' },
-    { id: 'weak-spots', icon: Target, title: 'Weak Spots', desc: 'Adaptive practice' },
-    { id: 'exam-problems', icon: FileText, title: 'Exam Problems', desc: 'Past finals' }
+    { id: 'quick-recall', icon: Zap, title: 'Quick Recall', desc: 'Instant warmup', route: 'practice' },
+    { id: 'weak-spots', icon: Target, title: 'Weak Spots', desc: 'Adaptive practice', route: 'practice' },
+    { id: 'exam-problems', icon: FileText, title: 'Exam Problems', desc: 'Past finals', route: 'exam' }
   ];
 
   const practiceModesRow2 = [
-    { id: 'mistake-replay', icon: RotateCcw, title: 'Mistake Replay', desc: 'Error correction' },
-    { id: 'compression', icon: Layers, title: 'Compression', desc: 'Build cheatsheet' }
+    { id: 'mistake-replay', icon: RotateCcw, title: 'Mistake Replay', desc: 'Error correction', route: 'practice' },
+    { id: 'compression', icon: Layers, title: 'Compression', desc: 'Build cheatsheet', route: 'compression' }
   ];
 
   return (
@@ -191,7 +194,7 @@ export function CourseHome() {
             {practiceModesRow1.map((mode) => (
               <button
                 key={mode.id}
-                onClick={() => handleStartPractice(mode.id)}
+                onClick={() => handleStartPractice(mode)}
                 className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
               >
                 <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">
@@ -204,7 +207,7 @@ export function CourseHome() {
             {practiceModesRow2.map((mode) => (
               <button
                 key={mode.id}
-                onClick={() => handleStartPractice(mode.id)}
+                onClick={() => handleStartPractice(mode)}
                 className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
               >
                 <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">

@@ -20,7 +20,8 @@
  */
 
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, ChevronRight, Lightbulb, Loader2, BookOpen } from 'lucide-react'
 import { useAuth } from '@/components/auth/AuthProvider'
@@ -39,6 +40,9 @@ export function PracticeSession() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const queryClient = useQueryClient()
+  const location = useLocation()
+  const weakOnly = location.state?.weakOnly === true
 
   // ==================== STATE ====================
 
@@ -104,10 +108,13 @@ export function PracticeSession() {
 
   // ==================== EFFECTS ====================
 
+  // Track if initial question is loading
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
+
   // Load first question on mount
   useEffect(() => {
-    if (session && !currentQuestion && session.course_id) {
-      loadNextQuestion()
+    if (session && !currentQuestion && session.course_id && isInitialLoad) {
+      loadNextQuestion().finally(() => setIsInitialLoad(false))
     }
   }, [session])
 
@@ -120,6 +127,7 @@ export function PracticeSession() {
       const question = await nextQuestionMutation.mutateAsync({
         user_id: user.id,
         course_id: session.course_id,
+        weak_only: weakOnly,
       })
 
       setCurrentQuestion(question)
@@ -189,6 +197,10 @@ export function PracticeSession() {
         session_id: session.id,
       })
 
+      // Force immediate refetch of mastery queries (course + topics)
+      queryClient.invalidateQueries({ queryKey: ['mastery'] })
+      queryClient.refetchQueries({ queryKey: ['mastery'] })
+
       // Navigate to course page with success message
       navigate(`/course/${session.course_id}/practice`, {
         state: {
@@ -213,25 +225,32 @@ export function PracticeSession() {
     }
   }
 
-  const handleOpenPdf = (documentId: string, title: string, page?: number) => {
-    const doc = sourceDocuments?.find(d => d.id === documentId)
-    if (!doc) return
-
-    const { data } = supabase.storage
-      .from('course-materials')
-      .getPublicUrl(doc.storage_path)
-
-    setSelectedPdf({
-      url: data.publicUrl,
-      title,
-      page,
-    })
-    setShowSourceMaterials(false)
+  // Lazy load hint if missing (edge function currently not returning hint)
+  const handleToggleHint = async () => {
+    if (!currentQuestion) return
+    // If we are about to show the hint and it is missing, fetch full question row
+    if (!showHint && (currentQuestion.hint === undefined || currentQuestion.hint === null)) {
+      try {
+        const { data, error } = await (await import('@/lib/supabase')).supabase
+          .from('questions')
+          .select('id, hint')
+          .eq('id', currentQuestion.id)
+          .single()
+        if (!error && data?.hint) {
+          // Merge hint into currentQuestion without losing other fields
+          setCurrentQuestion({ ...currentQuestion, hint: data.hint })
+        }
+      } catch (e) {
+        console.error('Failed to fetch hint:', e)
+      }
+    }
+    setShowHint(!showHint)
   }
 
   // ==================== LOADING & ERROR STATES ====================
 
-  if (sessionLoading) {
+  // Show loading during session fetch OR initial question load
+  if (sessionLoading || (isInitialLoad && !currentQuestion) || (nextQuestionMutation.isPending && !currentQuestion)) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -261,31 +280,39 @@ export function PracticeSession() {
     )
   }
 
-  if (nextQuestionMutation.isLoading && !currentQuestion) {
-    return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 animate-spin text-[#4F46E5]" />
-          <p className="text-[#6B7280]">Loading question...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (!currentQuestion) {
+  // Only show "No Questions Available" if we've finished loading and still have no question
+  if (!currentQuestion && !isInitialLoad && !nextQuestionMutation.isPending) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-semibold text-[#111827] mb-4">No Questions Available</h2>
-          <p className="text-[#6B7280] mb-6">
-            There are no questions available for this session right now.
-          </p>
+          {weakOnly ? (
+            <p className="text-[#6B7280] mb-6">
+              You currently have no weak topics. Try a global session to build mastery, then return to weak-only mode.
+            </p>
+          ) : (
+            <p className="text-[#6B7280] mb-6">
+              There are no questions available for this session right now.
+            </p>
+          )}
           <button
             onClick={() => navigate(`/course/${session.course_id}/practice`)}
             className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-6 py-3 rounded-[12px] transition-all"
           >
             Back to Practice
           </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Still loading question, show loading spinner
+  if (!currentQuestion) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-[#4F46E5]" />
+          <p className="text-[#6B7280]">Loading question...</p>
         </div>
       </div>
     )
@@ -386,20 +413,23 @@ export function PracticeSession() {
           {/* MCQ Options (if applicable) */}
           {currentQuestion.q_type === 'mcq' && currentQuestion.options && !showFeedback && (
             <div className="space-y-3 mb-8">
-              {Object.entries(currentQuestion.options as Record<string, string>).map(([key, value]) => (
-                <button
-                  key={key}
-                  onClick={() => setUserAnswer(key)}
-                  className={`w-full text-left p-4 border-2 rounded-[12px] transition-all ${
-                    userAnswer === key
-                      ? 'border-[#4F46E5] bg-[#EEF2FF]'
-                      : 'border-[#E5E7EB] hover:border-[#D1D5DB]'
-                  }`}
-                >
-                  <span className="font-medium text-[#4F46E5] mr-3">{key}.</span>
-                  <span className="text-[#111827]">{value}</span>
-                </button>
-              ))}
+              {Object.entries(currentQuestion.options as Record<string, any>).map(([key, value]) => {
+                const optionText = typeof value === 'object' ? value.text : value
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setUserAnswer(key)}
+                    className={`w-full text-left p-4 border-2 rounded-[12px] transition-all ${
+                      userAnswer === key
+                        ? 'border-[#4F46E5] bg-[#EEF2FF]'
+                        : 'border-[#E5E7EB] hover:border-[#D1D5DB]'
+                    }`}
+                  >
+                    <span className="font-medium text-[#4F46E5] mr-3">{key}.</span>
+                    <span className="text-[#111827]">{optionText}</span>
+                  </button>
+                )
+              })}
             </div>
           )}
 
@@ -429,7 +459,7 @@ export function PracticeSession() {
                 Check Answer
               </button>
               <button
-                onClick={() => setShowHint(!showHint)}
+                onClick={handleToggleHint}
                 className="flex items-center gap-2 text-[#6B7280] hover:text-[#4F46E5] transition-colors px-4 py-3"
               >
                 <Lightbulb className="w-5 h-5" />
@@ -439,10 +469,12 @@ export function PracticeSession() {
           )}
 
           {/* Hint */}
-          {showHint && currentQuestion.hint && !showFeedback && (
+          {showHint && !showFeedback && (
             <div className="bg-[#FEF3C7] border border-[#FDE047] rounded-[12px] p-4 text-sm mt-4">
               <div className="text-[#92400E] mb-1">💡 Hint</div>
-              <div className="text-[#92400E]">{currentQuestion.hint}</div>
+              <div className="text-[#92400E]">
+                {currentQuestion.hint || 'No hint available for this question.'}
+              </div>
             </div>
           )}
 
@@ -466,20 +498,42 @@ export function PracticeSession() {
               </div>
 
               {/* Correct Answer (if incorrect) */}
-              {!feedback.is_correct && (
-                <div className="bg-[#F0FDF4] border border-[#22C55E] rounded-[12px] p-6">
-                  <div className="text-sm text-[#166534] mb-2">✓ Correct Answer</div>
-                  <div className="text-[#166534]">
-                    {currentQuestion.q_type === 'mcq' && currentQuestion.options
-                      ? `${feedback.correct_answer}. ${(currentQuestion.options as any)[feedback.correct_answer]}`
-                      : feedback.correct_answer
-                    }
+              {/* Correct Answer & Rationale (always shown for MCQ) */}
+              {currentQuestion.q_type === 'mcq' && currentQuestion.options && (() => {
+                const correctOption = (currentQuestion.options as any)[feedback.correct_answer]
+                const correctText = typeof correctOption === 'object' ? correctOption.text : correctOption
+                const correctRationale = typeof correctOption === 'object' ? correctOption.rationale : null
+                return (
+                  <div className="bg-[#F0FDF4] border border-[#22C55E] rounded-[12px] p-6">
+                    <div className="text-sm text-[#166534] mb-2">✓ Correct Answer{feedback.is_correct ? '' : ''}</div>
+                    <div className="text-[#166534] mb-3">
+                      {`${feedback.correct_answer}. ${correctText}`}
+                    </div>
+                    {correctRationale && (
+                      <div className="text-sm text-[#166534] leading-relaxed">
+                        {correctRationale}
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                )
+              })()}
+
+              {/* Why Your Answer Was Wrong */}
+              {!feedback.is_correct && currentQuestion.q_type === 'mcq' && currentQuestion.options && (() => {
+                const userOption = (currentQuestion.options as any)[userAnswer]
+                const userRationale = typeof userOption === 'object' ? userOption.rationale : null
+                return userRationale ? (
+                  <div className="bg-[#FEF2F2] border border-[#EF4444] rounded-[12px] p-6">
+                    <div className="text-sm text-[#991B1B] mb-2">Why this answer is incorrect</div>
+                    <div className="text-sm text-[#991B1B] leading-relaxed">
+                      {userRationale}
+                    </div>
+                  </div>
+                ) : null
+              })()}
 
               {/* Explanation */}
-              {feedback.explanation && (
+              {feedback.explanation && !currentQuestion.options && (
                 <div className="bg-[#F9FAFB] rounded-[12px] p-6">
                   <div className="text-sm text-[#6B7280] mb-2">📖 Explanation</div>
                   <div className="text-[#111827]">{feedback.explanation}</div>

@@ -1,0 +1,62 @@
+{
+  "exam": {
+    "title": "Midterm Exam",
+    "description": "CSE120 Midterm covering processes, threads, and synchronization",
+    "course_id": "CSE120",
+    "time_limit": 90,
+    "passing_score": 70,
+    "instructions": "Select the best answer for each question. You have 90 minutes to complete this exam."
+  },
+  "questions": [
+    {
+      "question_text": "What is a process?",
+      "options": {
+        "A": {
+          "text": "A program in execution",
+          "rationale": "Correct! A process is an instance of a program that is being executed."
+        },
+        "B": {
+          "text": "A compiled binary file",
+          "rationale": "Incorrect. A compiled binary is just the executable file, not a running instance."
+        },
+        "C": {
+          "text": "A thread of execution",
+          "rationale": "Incorrect. A thread is a unit of execution within a process."
+        },
+        "D": {
+          "text": "A system call",
+          "rationale": "Incorrect. A system call is a request to the operating system kernel."
+        }
+      },
+      "correct_answer": "A",
+      "explanation": "A process represents a program in execution, including the program code, current activity, and allocated resources.",
+      "difficulty": "medium",
+      "tags": ["Processes & Threads"]
+    },
+    {
+      "question_text": "Which scheduling algorithm can lead to starvation?",
+      "options": {
+        "A": {
+          "text": "Round Robin",
+          "rationale": "Incorrect. Round Robin ensures all processes get CPU time periodically."
+        },
+        "B": {
+          "text": "First Come First Served",
+          "rationale": "Incorrect. FCFS serves processes in order, preventing starvation."
+        },
+        "C": {
+          "text": "Priority Scheduling",
+          "rationale": "Correct! Low-priority processes may never execute if high-priority processes keep arriving."
+        },
+        "D": {
+          "text": "Shortest Job First",
+          "rationale": "Partially correct, but priority scheduling is the classic example."
+        }
+      },
+      "correct_answer": "C",
+      "explanation": "Priority scheduling can cause starvation when low-priority processes are continually preempted by higher-priority ones.",
+      "difficulty": "medium",
+      "tags": ["Scheduling & Deadlock"]
+    }
+  ]
+}
