@@ -13,6 +13,7 @@
  */
 
 import { Target, Zap } from 'lucide-react'
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCourse, useTopics, useCourseMastery, useStartSession } from '@/hooks'
 import { useAuth } from '@/components/auth/AuthProvider'
@@ -23,6 +24,7 @@ export function PracticeView() {
   const { courseId } = useParams<{ courseId: string }>()
   const navigate = useNavigate()
   const { user, isLoading: authLoading } = useAuth()
+  const [startError, setStartError] = useState<string | null>(null)
 
   // Fetch course data with React Query - all hooks called unconditionally
   const { data: course, isLoading: courseLoading } = useCourse(courseId!)
@@ -66,19 +68,31 @@ export function PracticeView() {
 
   const totalTopics = topics?.length || 0
 
-  const handleStartSession = async (mode: 'practice' | 'global' = 'global') => {
+  const handleStartSession = async (
+    mode: 'practice' | 'global' | any = 'global',
+    weakOnly: boolean = false
+  ) => {
     if (!user) return
 
     try {
+      // If a React SyntheticEvent was passed (because onClick used direct reference),
+      // normalize mode to 'global'
+      const normalizedMode: 'practice' | 'global' =
+        mode === 'practice' || mode === 'global' ? mode : 'global'
+
       const session = await startSession.mutateAsync({
         user_id: user.id,
         course_id: courseId!,
-        mode,
+        mode: normalizedMode,
       })
-      // Navigate to global session route
-      navigate(`/session/${session.id}`)
+      // Navigate with weakOnly flag in route state
+      navigate(`/session/${session.id}`, { state: { weakOnly } })
     } catch (error) {
       console.error('Failed to start session:', error)
+      // Surface error to user
+      setStartError(
+        error instanceof Error ? error.message : 'Failed to start session'
+      )
     }
   }
 
@@ -123,9 +137,12 @@ export function PracticeView() {
               <p className="text-[#C7D2FE] text-lg">
                 Questions automatically adapt to your mastery level
               </p>
+              {startError && (
+                <p className="mt-3 text-sm text-red-200">{startError}</p>
+              )}
             </div>
             <button
-              onClick={handleStartSession}
+              onClick={() => handleStartSession('global', false)}
               disabled={startSession.isPending}
               className="bg-white text-[#4F46E5] px-8 py-4 rounded-[12px] font-medium hover:bg-[#F9FAFB] transition-all shadow-lg disabled:opacity-50"
             >
@@ -139,7 +156,7 @@ export function PracticeView() {
           <h3 className="text-xl mb-4">Quick Start</h3>
           <div className="grid grid-cols-2 gap-4">
             <button
-              onClick={() => handleStartSession('global')}
+              onClick={() => handleStartSession('global', false)}
               disabled={startSession.isPending}
               className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -151,7 +168,7 @@ export function PracticeView() {
             </button>
 
             <button
-              onClick={() => handleStartSession('global')}
+              onClick={() => handleStartSession('global', true)}
               disabled={startSession.isPending || weakSpots === 0}
               className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all group disabled:opacity-50 disabled:cursor-not-allowed"
               title={weakSpots === 0 ? 'No weak spots to practice!' : undefined}

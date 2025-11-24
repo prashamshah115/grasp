@@ -151,6 +151,7 @@ export interface Database {
           options: Json | null
           correct_answer: Json
           explanation: string | null
+          hint: string | null
           difficulty: 1 | 2 | 3 | null
           source_ref: string | null
           created_at: string
@@ -164,6 +165,7 @@ export interface Database {
           options?: Json | null
           correct_answer: Json
           explanation?: string | null
+          hint?: string | null
           difficulty?: 1 | 2 | 3 | null
           source_ref?: string | null
           created_at?: string
@@ -177,6 +179,7 @@ export interface Database {
           options?: Json | null
           correct_answer?: Json
           explanation?: string | null
+          hint?: string | null
           difficulty?: 1 | 2 | 3 | null
           source_ref?: string | null
           created_at?: string

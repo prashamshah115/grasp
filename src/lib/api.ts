@@ -295,16 +295,27 @@ export async function endSession(request: EndSessionRequest): Promise<EndSession
 
 /**
  * ✅ IMPLEMENTED: Fetch all exams for a course
+ * Includes question count for each exam
  */
 export async function fetchExams(courseId: string) {
   const { data, error } = await supabase
     .from('exams')
-    .select('*')
+    .select(`
+      *,
+      exam_questions(count)
+    `)
     .eq('course_id', courseId)
     .order('created_at', { ascending: false })
 
   if (error) handleSupabaseError(error)
-  return data || []
+  
+  // Transform the data to add num_questions field
+  const examsWithCounts = data?.map(exam => ({
+    ...exam,
+    num_questions: exam.exam_questions?.[0]?.count || 0
+  })) || []
+
+  return examsWithCounts
 }
 
 /**
@@ -458,21 +469,42 @@ export async function createExamSession(
 ): Promise<CreateExamSessionResponse> {
   const user = await requireAuth()
 
-  return retryWithBackoff(async () => {
-    const { data, error } = await supabase.functions.invoke<CreateExamSessionResponse>(
-      'start-exam-session',
-      {
-        body: {
-          exam_id: request.exam_id,
-        },
-      }
-    )
+  console.log('[createExamSession] Starting exam session creation for exam:', request.exam_id)
+  console.log('[createExamSession] User ID:', user.id)
 
-    if (error) throw error
-    if (!data) throw new Error('No data returned from start-exam-session')
+  // Don't use retryWithBackoff for this - we want the actual error message
+  const { data, error } = await supabase.functions.invoke<CreateExamSessionResponse>(
+    'start-exam-session',
+    {
+      body: {
+        exam_id: request.exam_id,
+      },
+    }
+  )
 
-    return data
-  })
+  console.log('[createExamSession] Response received')
+  console.log('[createExamSession] Data:', data)
+  console.log('[createExamSession] Error:', error)
+
+  if (error) {
+    console.error('[createExamSession] Edge function error:', error)
+    // Try to extract more details from the error
+    const errorDetails = {
+      message: error.message,
+      context: error.context,
+      statusCode: (error as any).statusCode || (error as any).status,
+      details: (error as any).details,
+    }
+    console.error('[createExamSession] Error details:', errorDetails)
+    throw error
+  }
+  if (!data) {
+    console.error('[createExamSession] No data returned from edge function')
+    throw new Error('No data returned from start-exam-session')
+  }
+
+  console.log('[createExamSession] Success! Session ID:', data.session_id)
+  return data
 }
 
 /**
@@ -545,13 +577,13 @@ export async function getNextGlobalQuestion(
       {
         body: {
           courseId: request.course_id,
+          weakOnly: request.weak_only === true,
         },
       }
     )
 
     if (error) throw error
     if (!data) throw new Error('No question available')
-
     return data
   })
 }

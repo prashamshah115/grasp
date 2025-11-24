@@ -1,0 +1,309 @@
+{
+  "exam": {
+    "title": "CSE120 Final Exam",
+    "description": "Comprehensive final covering paging, virtual memory, filesystems, synchronization, links, RAID, shared memory, and general OS mechanisms and policies.",
+    "course_id": "CSE120",
+    "time_limit": 180,
+    "passing_score": 70,
+    "instructions": "Select the best answer for each question. You have 180 minutes to complete this exam."
+  },
+  "questions": [
+
+    {
+      "question_text": "1(a) Which bit in the PTE does the operating system use for approximating LRU replacement?",
+      "correct_answer": "Reference/Use bit",
+      "explanation": "The reference bit (also called the use bit) is updated by hardware whenever the page is accessed, allowing OS algorithms such as Clock to approximate LRU without tracking exact timestamps.",
+      "difficulty": "easy",
+      "tags": ["Paging", "Virtual Memory"]
+    },
+    {
+      "question_text": "1(b) The layout of disk blocks for a file using Unix inodes is always/sometimes/never contiguous on disk?",
+      "correct_answer": "Sometimes",
+      "explanation": "Unix inodes use indexed block pointers rather than requiring contiguous allocation. A file may happen to be contiguous, but the filesystem does not guarantee this.",
+      "difficulty": "easy",
+      "tags": ["File Systems"]
+    },
+    {
+      "question_text": "1(c) Does a TLB miss always/sometimes/never result in a page-in from disk?",
+      "correct_answer": "Sometimes",
+      "explanation": "A TLB miss only means the mapping is not cached in the TLB. If the page is in physical memory but not in the TLB, the OS simply loads the mapping into the TLB without performing disk I/O.",
+      "difficulty": "easy",
+      "tags": ["Virtual Memory", "Paging"]
+    },
+    {
+      "question_text": "1(d) In RPC, what does the server-stub call?",
+      "correct_answer": "The server procedure",
+      "explanation": "Server stubs unpack parameters, perform necessary translation, and invoke the actual server-side procedure on behalf of the remote caller.",
+      "difficulty": "easy",
+      "tags": ["Processes & Threads"]
+    },
+    {
+      "question_text": "1(e) What are the two components of a virtual address used in segmented virtual memory?",
+      "correct_answer": "Segment number and offset",
+      "explanation": "Segmented addressing divides virtual memory into variable-sized segments, each referenced by a segment identifier and an offset within that segment.",
+      "difficulty": "easy",
+      "tags": ["Memory Management"]
+    },
+    {
+      "question_text": "1(f) In general, are there more/same/fewer inodes than directories in a Unix file system?",
+      "correct_answer": "More",
+      "explanation": "Inodes correspond to files, including data files, device files, and directories. Files greatly outnumber directories, so there are many more inodes than directories.",
+      "difficulty": "easy",
+      "tags": ["File Systems"]
+    },
+    {
+      "question_text": "1(g) In what Nachos file was StartProcess implemented?",
+      "correct_answer": "progtest.cc",
+      "explanation": "Nachos educational OS includes process startup logic in progtest.cc, which handles loading user programs and starting execution.",
+      "difficulty": "easy",
+      "tags": ["Processes & Threads"]
+    },
+    {
+      "question_text": "1(h) What kind of pages in a process’s virtual address space are usually protected as 'Read Only'?",
+      "correct_answer": "Code pages (and copy-on-write pages)",
+      "explanation": "Executable code is normally read-only to prevent accidental modification. Copy-on-write also temporarily marks pages read-only to detect writes.",
+      "difficulty": "easy",
+      "tags": ["Memory Management", "Virtual Memory"]
+    },
+    {
+      "question_text": "1(i) The layout of virtual pages for a virtual address space is always/sometimes/never contiguous in physical memory?",
+      "correct_answer": "Sometimes",
+      "explanation": "Virtual memory allows pages to be non-contiguous, but incidental contiguity may occur depending on allocation patterns.",
+      "difficulty": "easy",
+      "tags": ["Virtual Memory"]
+    },
+    {
+      "question_text": "1(j) In what metric do RAID arrays improve performance?",
+      "correct_answer": "Throughput",
+      "explanation": "RAID uses parallelism across disks, improving overall bandwidth (throughput). Some RAID levels may also reduce latency, but throughput is the primary benefit.",
+      "difficulty": "easy",
+      "tags": ["File Systems"]
+    },
+    {
+      "question_text": "1(k) Is it possible to implement a file system inside a file stored in another file system?",
+      "correct_answer": "Yes",
+      "explanation": "Virtualization allows treating a file as a block device. Many systems (disk images, VM filesystems) store entire filesystems inside a single file.",
+      "difficulty": "easy",
+      "tags": ["File Systems"]
+    },
+    {
+      "question_text": "1(l) Was the exam too easy / just right / too hard? (free point)",
+      "correct_answer": "Varies / subjective response",
+      "explanation": "This was a free question; any response was accepted for full credit.",
+      "difficulty": "easy",
+      "tags": ["Processes & Threads"]
+    }
+    ,
+    {
+      "question_text": "2(a) Identify: PTE – Define it and state whether it is a mechanism or a policy.",
+      "correct_answer": "A Page Table Entry that maps virtual to physical addresses; mechanism.",
+      "explanation": "A PTE stores mapping information (physical page number, protection bits, valid bit). It is part of the hardware/OS mechanism for implementing virtual memory.",
+      "difficulty": "easy",
+      "tags": ["Virtual Memory", "Paging", "Architecture"]
+    },
+    {
+      "question_text": "2(b) Identify: SCAN – Define it and state whether it is a mechanism or a policy.",
+      "correct_answer": "SCAN is the Elevator disk scheduling algorithm; policy.",
+      "explanation": "SCAN moves the disk head back and forth across the disk, servicing requests in order of cylinder position. It is a scheduling policy deciding request order.",
+      "difficulty": "medium",
+      "tags": ["File Systems", "Scheduling & Deadlock"]
+    },
+    {
+      "question_text": "2(c) Identify: Working set – Define it and state whether it is a mechanism or a policy.",
+      "correct_answer": "The set of pages needed during a time window to avoid page faults; policy.",
+      "explanation": "The working set describes the pages a process is actively using. It is a conceptual policy framework for page replacement decisions.",
+      "difficulty": "medium",
+      "tags": ["Virtual Memory", "Paging"]
+    },
+    {
+      "question_text": "2(d) Identify: LRU – Define it and state whether it is a mechanism or a policy.",
+      "correct_answer": "Least Recently Used page replacement algorithm; policy.",
+      "explanation": "LRU evicts the page whose last access is furthest in the past. This is a page replacement policy, not a hardware mechanism.",
+      "difficulty": "medium",
+      "tags": ["Paging", "Virtual Memory"]
+    },
+    {
+      "question_text": "2(e) Identify: Thrashing – Define it and state whether it is a mechanism or a policy-related phenomenon.",
+      "correct_answer": "Excessive paging causing low progress; relates to policy.",
+      "explanation": "Thrashing occurs when the system spends most time paging instead of executing. It results from poor replacement policies or insufficient memory.",
+      "difficulty": "medium",
+      "tags": ["Virtual Memory", "Paging"]
+    },
+    {
+      "question_text": "2(f) Identify: Inode – Define it and state whether it is a mechanism or a policy.",
+      "correct_answer": "Unix file descriptor structure describing file blocks; mechanism.",
+      "explanation": "The inode is the on-disk metadata describing file layout, permissions, and block pointers. It is an implementation mechanism of the filesystem.",
+      "difficulty": "easy",
+      "tags": ["File Systems"]
+    },
+    {
+      "question_text": "2(g) Identify: Access control list – Define it and state whether it is a mechanism or a policy.",
+      "correct_answer": "A list specifying subjects and permitted actions on an object; mechanism.",
+      "explanation": "ACLs enumerate access rights for objects. They implement OS protection mechanisms, while policies determine what rights should be granted.",
+      "difficulty": "easy",
+      "tags": ["Processes & Threads", "File Systems"]
+    }
+    ,
+    {
+      "question_text": "3. Operating systems frequently exploit locality to improve performance. Briefly describe two examples and how locality is exploited.",
+      "correct_answer": "Virtual memory exploits spatial and temporal locality when caching pages; the file buffer cache exploits locality when caching file blocks.",
+      "explanation": "Virtual memory uses temporal locality because programs tend to access recently touched pages again, and spatial locality because accesses often cluster near each other on a page. File buffer caches use similar reasoning: recently accessed file blocks are likely to be accessed again, and sequential file access benefits from spatial locality and read-ahead optimization.",
+      "difficulty": "medium",
+      "tags": ["Virtual Memory", "File Systems", "Paging"]
+    },
+
+    {
+      "question_text": "4(a). In the Inode Page Tables design, how many virtual pages are fast pages? (Assume 32-bit addresses, 4KB pages, and master+secondary page tables fit in one page.)",
+      "correct_answer": "512 fast pages",
+      "explanation": "A single page table page holds 4KB / 4 bytes = 1024 PTEs; half of them (512) are fast entries.",
+      "difficulty": "medium",
+      "tags": ["Paging", "Virtual Memory"]
+    },
+    {
+      "question_text": "4(b). How many virtual pages are normal pages?",
+      "correct_answer": "2^19 normal pages",
+      "explanation": "The remaining 512 PTEs point to secondary page tables, each with 1024 PTEs → 512 × 1024 = 2^19 pages.",
+      "difficulty": "medium",
+      "tags": ["Paging", "Virtual Memory"]
+    },
+    {
+      "question_text": "4(c). What is the maximum address space size in bytes?",
+      "correct_answer": "2^21 + 2^31 bytes",
+      "explanation": "Total pages = (2^9 fast + 2^19 normal). Each page is 2^12 bytes. Multiplying yields 2^(9+12) + 2^(19+12) = 2^21 + 2^31 bytes.",
+      "difficulty": "medium",
+      "tags": ["Paging", "Virtual Memory"]
+    },
+    {
+      "question_text": "4(d). Is reducing TLB miss handling by one memory access an effective optimization?",
+      "correct_answer": "No",
+      "explanation": "TLB misses are infrequent, and saving one memory reference in the miss handler yields minimal overall performance improvement. It also complicates lookup logic by forcing a distinction between fast and normal page types.",
+      "difficulty": "medium",
+      "tags": ["Paging", "Virtual Memory"]
+    },
+
+    {
+      "question_text": "5. Describe a scenario of context switches where two threads can enter a critical section guarded by a semaphore whose Wait/Signal are not atomic.",
+      "correct_answer": "T1 checks S.count > 0 and is preempted before decrement; T2 also sees S.count > 0, decrements it, enters; then T1 resumes and decrements it, entering as well.",
+      "explanation": "With a non-atomic Wait, the check (S.count > 0) and decrement occur separately. If T1 passes the check and is context-switched before decrementing, T2 may also pass the check and enter the critical section. When T1 resumes, it decrements count and enters, violating mutual exclusion.",
+      "difficulty": "medium",
+      "tags": ["Synchronization", "Semaphores & Monitors"]
+    }
+    ,
+    {
+      "question_text": "6(a). Describe the steps Unix performs to resolve the path '/sbin/ls' and read the first byte of the file.",
+      "correct_answer": "Read root inode, read root directory, read 'sbin' inode, read 'sbin' directory, read 'ls' inode, read first data block.",
+      "explanation": "The system reads: master block → inode for '/' → first block of '/' → inode for 'sbin' → first block of 'sbin' → inode for 'ls' → first block of 'ls'. This sequence resolves each component and finally retrieves the file contents.",
+      "difficulty": "hard",
+      "tags": ["File Systems"]
+    },
+    {
+      "question_text": "6(b). How many disk reads are needed to resolve '/sbin/ls' and read the first byte?",
+      "correct_answer": "7 disk reads",
+      "explanation": "Each step requires one read: root inode, root directory block, sbin inode, sbin directory block, ls inode, and first block of ls, plus master block depending on interpretation. The solution key expects 7.",
+      "difficulty": "hard",
+      "tags": ["File Systems"]
+    },
+    {
+      "question_text": "6(c). For a hard link '/bin/ls' pointing to '/sbin/ls', describe the steps to read the first byte of the file.",
+      "correct_answer": "Same number of steps as resolving '/sbin/ls', but with '/bin' directory instead of '/sbin'.",
+      "explanation": "A hard link maps the filename directly to the same inode. Resolving '/bin/ls' requires reading directories and inodes just as '/sbin/ls' does. The link count keeps the inode alive.",
+      "difficulty": "hard",
+      "tags": ["File Systems"]
+    },
+    {
+      "question_text": "6(d). For a soft link '/bin/ls' → '/sbin/ls', describe how many reads are needed to read the first byte.",
+      "correct_answer": "Approximately 12 reads",
+      "explanation": "A soft link stores a path string. Resolving '/bin/ls' reads root, bin directory, and the symlink inode/block. Then the system resolves '/sbin/ls' as in part (a). Total ≈ 12 reads.",
+      "difficulty": "hard",
+      "tags": ["File Systems"]
+    },
+    {
+      "question_text": "6(e). If '/sbin/ls' is removed, are the hard and soft links still valid?",
+      "correct_answer": "Hard link remains valid; soft link becomes invalid.",
+      "explanation": "A hard link increments the inode's reference count; removing the original filename does not remove the underlying inode. A soft link stores a pathname, so deleting '/sbin/ls' causes path resolution to fail.",
+      "difficulty": "medium",
+      "tags": ["File Systems"]
+    },
+
+    {
+      "question_text": "7. Briefly describe the most challenging bug your group encountered in Project 3, how you found it, how long it took, and who would answer best.",
+      "correct_answer": "A realistic response describing a synchronization or paging bug encountered during Nachos Project 3.",
+      "explanation": "Example realistic answer: Our most difficult bug was a race condition in the swap manager when multiple page faults occurred concurrently. Some threads accessed the same free-frame list without locking, which occasionally corrupted entries. We found it by adding assertions and running stress tests that triggered rapid context switching. It took roughly six hours to isolate, and one team member—who debugged the virtual memory subsystem—would provide the best explanation.",
+      "difficulty": "medium",
+      "tags": ["Processes & Threads", "Virtual Memory", "Synchronization"]
+    },
+
+    {
+      "question_text": "8(a). What should SharedRegionCreate do to the caller’s page table?",
+      "correct_answer": "Mark pages in the region as Shared = TRUE.",
+      "explanation": "The Shared flag indicates that these virtual pages map to shared regions. The creator also records metadata such as RegionID, but the question focuses on updating page table entries.",
+      "difficulty": "medium",
+      "tags": ["Virtual Memory", "Memory Management"]
+    },
+    {
+      "question_text": "8(b). What should SharedRegionAttach do to the caller’s page table?",
+      "correct_answer": "Mark pages as Shared and copy mappings from the creator’s page table.",
+      "explanation": "SharedRegionAttach maps the same physical pages into the attaching process’s page table. This ensures all attached processes share the same underlying data pages.",
+      "difficulty": "hard",
+      "tags": ["Virtual Memory", "Memory Management"]
+    },
+    {
+      "question_text": "8(c). What page table operations must occur when a shared page is paged out?",
+      "correct_answer": "Invalidate all PTEs referencing the page and update at least one with the disk location.",
+      "explanation": "Shared pages may be referenced by multiple processes. When evicted, all page tables must reflect the eviction by clearing valid bits. Disk metadata must be recorded for correct paging back in.",
+      "difficulty": "hard",
+      "tags": ["Virtual Memory", "Paging"]
+    },
+    {
+      "question_text": "8(d). What operations must occur when a shared page is paged in?",
+      "correct_answer": "Update all PTEs to map to the newly loaded physical page and set valid bits.",
+      "explanation": "Every process sharing the region must receive consistent updates so that their virtual addresses map to the same physical page.",
+      "difficulty": "hard",
+      "tags": ["Virtual Memory", "Paging"]
+    },
+    {
+      "question_text": "8(e). How should AddrSpace destructor behave with shared pages?",
+      "correct_answer": "Free a physical page only if this is the last address space referencing it.",
+      "explanation": "To avoid deallocating shared memory prematurely, destruction must check reference counts. Alternatively, some implementations invalidate PTEs for all attached address spaces.",
+      "difficulty": "hard",
+      "tags": ["Virtual Memory", "Memory Management"]
+    },
+    {
+      "question_text": "8(f). Name three error conditions SharedRegionCreate/Attach must check for.",
+      "correct_answer": "Examples: invalid VA range, nonexistent RegionID, region already existed, region already attached.",
+      "explanation": "Valid checks include: Begin/end addresses invalid; SharedRegionAttach referencing nonexistent RegionID; region already created; attach attempted twice by same process; invalid alignment of region boundaries; region exceeding allowed shared-memory range.",
+      "difficulty": "medium",
+      "tags": ["Virtual Memory", "Memory Management"]
+    }
+    ,
+    {
+      "question_text": "9(a). What topic in this course struck you as least interesting, least relevant, or least impactful?",
+      "correct_answer": "A realistic student-style reflection describing a less impactful topic.",
+      "explanation": "Example answer: The least interesting topic for me was RAID level distinctions because they felt more like hardware engineering details than core OS principles. While important, the conceptual depth felt lower compared to virtual memory or scheduling.",
+      "difficulty": "easy",
+      "tags": ["Processes & Threads"]
+    },
+    {
+      "question_text": "9(b). What topic in this course was the most interesting to you?",
+      "correct_answer": "A realistic student-style statement describing a preferred OS topic.",
+      "explanation": "Example answer: Virtual memory was the most interesting because it revealed how the OS creates the powerful abstraction of private address spaces, enabling protection, paging, and multiprogramming.",
+      "difficulty": "easy",
+      "tags": ["Processes & Threads"]
+    },
+    {
+      "question_text": "9(c). What operating system topic were you hoping to learn about that was not covered?",
+      "correct_answer": "A realistic student-style answer naming an advanced topic.",
+      "explanation": "Example answer: I hoped to learn more about containerization and OS-level virtualization (e.g., namespaces, cgroups), which are used in modern cloud systems but not covered in this course.",
+      "difficulty": "easy",
+      "tags": ["Processes & Threads"]
+    },
+    {
+      "question_text": "9(d). What message would you give to incoming students of the next offering of CSE 120?",
+      "correct_answer": "A helpful and encouraging message for future students.",
+      "explanation": "Example answer: Start the Nachos projects early, because debugging concurrency and virtual memory code requires more iteration than you expect. Attend discussion sections and read the starter code carefully.",
+      "difficulty": "easy",
+      "tags": ["Processes & Threads"]
+    }
+
+  ]
+}

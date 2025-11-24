@@ -274,7 +274,7 @@ Deno.test({
 })
 
 Deno.test({
-  name: 'start-exam-session: should return 409 for duplicate active session',
+  name: 'start-exam-session: duplicate request should return existing session',
   async fn() {
     await setup()
 
@@ -306,7 +306,10 @@ Deno.test({
 
     assertEquals(response1.status, 200)
 
-    // Second request - should fail with 409
+    const data1 = await response1.json()
+    assertExists(data1.session_id)
+
+    // Second request - should return same session for resume flow
     const response2 = await fetch(`${supabaseUrl}/functions/v1/start-exam-session`, {
       method: 'POST',
       headers: {
@@ -318,11 +321,12 @@ Deno.test({
       }),
     })
 
-    assertEquals(response2.status, 409)
+    assertEquals(response2.status, 200)
 
-    const data = await response2.json()
-    assertExists(data.error)
-    assertEquals(data.code, 'CONFLICT')
+    const data2 = await response2.json()
+    assertExists(data2.session_id)
+    assertEquals(data2.session_id, data1.session_id)
+    assertEquals(data2.exam.id, data1.exam.id)
 
     await cleanup()
   },

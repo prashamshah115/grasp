@@ -20,7 +20,9 @@ export function useTopicMastery(userId: string | undefined, topicId: string | un
     queryKey: queryKeys.mastery.byTopic(userId!, topicId!),
     queryFn: () => fetchTopicMastery(userId!, topicId!),
     enabled: !!userId && !!topicId,
-    staleTime: 1 * 60 * 1000, // 1 minute (mastery changes frequently during practice)
+    staleTime: 1 * 60 * 1000,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -33,6 +35,8 @@ export function useCourseMastery(userId: string | undefined, courseId: string | 
     queryFn: () => fetchCourseMastery(userId!, courseId!),
     enabled: !!userId && !!courseId,
     staleTime: 1 * 60 * 1000,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   })
 }
 

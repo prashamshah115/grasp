@@ -30,7 +30,6 @@ import {
   isValidUUID,
   NotFoundError,
   ForbiddenError,
-  ConflictError,
   ValidationError,
 } from '../_shared/errors.ts'
 
@@ -78,19 +77,44 @@ serve(async (req) => {
 
   try {
     console.log(`[${FUNCTION_NAME}] Request received`)
+    console.log(`[${FUNCTION_NAME}] Method:`, req.method)
+    console.log(`[${FUNCTION_NAME}] Headers:`, Object.fromEntries(req.headers.entries()))
+
+    // Check environment variables
+    const supabaseUrl = Deno.env.get('PUBLIC_SUPABASE_URL')
+    const serviceRoleKey = Deno.env.get('SERVICE_ROLE_KEY')
+    
+    if (!supabaseUrl) {
+      console.error(`[${FUNCTION_NAME}] Missing PUBLIC_SUPABASE_URL environment variable`)
+      throw new Error('Server configuration error: Missing PUBLIC_SUPABASE_URL')
+    }
+    
+    if (!serviceRoleKey) {
+      console.error(`[${FUNCTION_NAME}] Missing SERVICE_ROLE_KEY environment variable`)
+      throw new Error('Server configuration error: Missing SERVICE_ROLE_KEY')
+    }
+
+    console.log(`[${FUNCTION_NAME}] Environment check passed`)
 
     // Initialize Supabase client with service role
-    const supabase = createClient(
-      Deno.env.get('PUBLIC_SUPABASE_URL')!,
-      Deno.env.get('SERVICE_ROLE_KEY')!
-    )
+    const supabase = createClient(supabaseUrl, serviceRoleKey)
 
     // Authenticate user
+    console.log(`[${FUNCTION_NAME}] Authenticating user...`)
     const { user } = await requireAuth(req, supabase)
     console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
 
     // Parse and validate request body
-    const body = await req.json() as StartExamSessionRequest
+    console.log(`[${FUNCTION_NAME}] Parsing request body...`)
+    let body: StartExamSessionRequest
+    try {
+      body = await req.json() as StartExamSessionRequest
+      console.log(`[${FUNCTION_NAME}] Request body:`, body)
+    } catch (parseError) {
+      console.error(`[${FUNCTION_NAME}] Failed to parse request body:`, parseError)
+      throw new ValidationError('Invalid JSON in request body')
+    }
+    
     validateRequired(body, ['exam_id'])
 
     const { exam_id } = body
@@ -167,13 +191,12 @@ serve(async (req) => {
     }
 
     if (activeSession) {
-      console.warn(`[${FUNCTION_NAME}] Active session already exists:`, activeSession.id)
-      throw new ConflictError(
-        `You already have an active session for this exam. Session ID: ${activeSession.id}`
+      console.warn(
+        `[${FUNCTION_NAME}] Active session already exists (${activeSession.id}) - resuming`
       )
+    } else {
+      console.log(`[${FUNCTION_NAME}] No active sessions found, creating new session`)
     }
-
-    console.log(`[${FUNCTION_NAME}] No active sessions found, proceeding...`)
 
     // ==================== STEP 4: Load Exam Questions ====================
 
@@ -211,31 +234,46 @@ serve(async (req) => {
 
     // ==================== STEP 5: Create Exam Session ====================
 
-    const startedAt = new Date()
     const durationMs = exam.duration_min * 60 * 1000
-    const endsAt = new Date(startedAt.getTime() + durationMs)
-    const timeRemainingSec = exam.duration_min * 60
+    const durationSec = exam.duration_min * 60
+    let session = activeSession
+    let startedAt = activeSession ? new Date(activeSession.started_at) : new Date()
 
-    const { data: session, error: sessionError } = await supabase
-      .from('exam_sessions')
-      .insert({
-        user_id: user.id,
-        exam_id: exam_id,
-        started_at: startedAt.toISOString(),
-        time_remaining_sec: timeRemainingSec,
-        is_completed: false,
-        score: null,
-        submitted_at: null,
-      })
-      .select()
-      .single()
+    if (!activeSession) {
+      const { data: newSession, error: sessionError } = await supabase
+        .from('exam_sessions')
+        .insert({
+          user_id: user.id,
+          exam_id: exam_id,
+          started_at: startedAt.toISOString(),
+          time_remaining_sec: durationSec,
+          is_completed: false,
+          score: null,
+          submitted_at: null,
+        })
+        .select()
+        .single()
 
-    if (sessionError) {
-      console.error(`[${FUNCTION_NAME}] Session creation error:`, sessionError)
-      throw sessionError
+      if (sessionError) {
+        console.error(`[${FUNCTION_NAME}] Session creation error:`, sessionError)
+        throw sessionError
+      }
+
+      session = newSession
+      startedAt = new Date(newSession.started_at)
+      console.log(`[${FUNCTION_NAME}] Session created:`, session.id)
+    } else {
+      console.log(`[${FUNCTION_NAME}] Reusing session:`, activeSession.id)
     }
 
-    console.log(`[${FUNCTION_NAME}] Session created:`, session.id)
+    if (!session) {
+      throw new Error('Failed to initialize exam session')
+    }
+
+    const endsAt = new Date(startedAt.getTime() + durationMs)
+    const now = new Date()
+    const timeRemainingSec = Math.max(0, Math.floor((endsAt.getTime() - now.getTime()) / 1000))
+    const startedAtIso = startedAt.toISOString()
 
     // ==================== STEP 6: Format Questions (Strip Correct Answers) ====================
 
@@ -265,7 +303,7 @@ serve(async (req) => {
         course_name: exam.courses.name,
       },
       questions: sanitizedQuestions,
-      started_at: startedAt.toISOString(),
+      started_at: startedAtIso,
       ends_at: endsAt.toISOString(),
       time_remaining_sec: timeRemainingSec,
     }

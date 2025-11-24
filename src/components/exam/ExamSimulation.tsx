@@ -249,9 +249,9 @@ export function ExamSimulation() {
   // Format options for QuestionCard component
   const formattedOptions =
     currentQuestion.q_type === 'mcq' && currentQuestion.options
-      ? Object.entries(currentQuestion.options as Record<string, string>).map(([id, text]) => ({
+      ? Object.entries(currentQuestion.options as Record<string, any>).map(([id, value]) => ({
           id,
-          text,
+          text: typeof value === 'string' ? value : value.text || value,
         }))
       : []
 

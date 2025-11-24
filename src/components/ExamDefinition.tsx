@@ -49,11 +49,11 @@ export default function ExamDefinition() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="max-w-2xl w-full bg-white rounded-lg shadow-lg p-8">
-        <h1 className="text-3xl font-bold mb-4">{exam.title}</h1>
+        <h1 className="text-3xl font-bold mb-4">{exam.name}</h1>
 
         <div className="mb-6 space-y-2">
           <p className="text-gray-600">
-            <strong>Duration:</strong> {exam.duration_minutes} minutes
+            <strong>Duration:</strong> {exam.duration_min} minutes
           </p>
           <p className="text-gray-600">
             <strong>Questions:</strong> {exam.num_questions || 'TBD'}
@@ -64,7 +64,7 @@ export default function ExamDefinition() {
           <h2 className="text-xl font-semibold mb-2">Instructions</h2>
           <p className="text-gray-700">
             This exam will test your knowledge on the course material.
-            You will have {exam.duration_minutes} minutes to complete all questions.
+            You will have {exam.duration_min} minutes to complete all questions.
             Once you start, the timer cannot be paused.
           </p>
         </div>

@@ -90,7 +90,7 @@ export function ExamView() {
               >
                 <div className="flex items-start justify-between mb-8">
                   <div className="flex-1">
-                    <h2 className="text-3xl text-white mb-3">{exam.title}</h2>
+                    <h2 className="text-3xl text-white mb-3">{exam.name}</h2>
                     <p className="text-[#FDE68A] text-lg mb-6">
                       Simulates real exam conditions with timer and question navigation
                     </p>
@@ -99,7 +99,7 @@ export function ExamView() {
                     <div className="flex gap-6">
                       <div className="flex items-center gap-2 text-white">
                         <Clock className="w-5 h-5" />
-                        <span className="font-medium">{exam.duration_minutes} minutes</span>
+                        <span className="font-medium">{exam.duration_min} minutes</span>
                       </div>
                       {exam.num_questions && (
                         <div className="flex items-center gap-2 text-white">
@@ -180,7 +180,7 @@ export function ExamView() {
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
                           <h4 className="font-medium text-[#111827]">
-                            {session.exams?.title || 'Exam'}
+                            {session.exams?.name || 'Exam'}
                           </h4>
                           {isCompleted && (
                             <CheckCircle className="w-5 h-5 text-[#10B981]" />
@@ -196,10 +196,10 @@ export function ExamView() {
                               minute: '2-digit'
                             })}
                           </span>
-                          {session.exams?.duration_minutes && (
+                          {session.exams?.duration_min && (
                             <span className="flex items-center gap-1">
                               <Clock className="w-4 h-4" />
-                              {session.exams.duration_minutes} min
+                              {session.exams.duration_min} min
                             </span>
                           )}
                         </div>

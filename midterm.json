@@ -1,0 +1,158 @@
+{
+  "exam": {
+    "title": "CSE120 Midterm Exam",
+    "description": "Midterm covering operating system fundamentals: synchronization, deadlock, scheduling, exceptions, threads, and join behavior in Nachos.",
+    "course_id": "CSE120",
+    "time_limit": 80,
+    "passing_score": 70,
+    "instructions": "Select the best answer for each question. You have 80 minutes to complete this exam."
+  },
+  "questions": [
+
+    {
+      "question_text": "1(a) Does the test-and-set instruction need to be a privileged instruction?",
+      "correct_answer": "No",
+      "explanation": "Test-and-set does not need to be privileged because the hardware can safely allow user-level execution of atomic read-modify-write operations.",
+      "difficulty": "easy",
+      "tags": ["Synchronization"]
+    },
+    {
+      "question_text": "1(b) What approach to dealing with deadlock does the Banker's algorithm implement?",
+      "correct_answer": "Avoidance",
+      "explanation": "The Banker’s algorithm checks whether granting a resource request is safe. This allows the OS to avoid entering unsafe states that may lead to deadlock.",
+      "difficulty": "easy",
+      "tags": ["Scheduling & Deadlock"]
+    },
+    {
+      "question_text": "1(c) Which of the following scheduling algorithms can lead to starvation? FIFO, Shortest Job First, Priority, Round Robin",
+      "correct_answer": "SJF and Priority",
+      "explanation": "Shortest Job First favors shorter jobs and may starve long ones; Priority scheduling may indefinitely delay low-priority tasks if high-priority tasks continue arriving.",
+      "difficulty": "medium",
+      "tags": ["Scheduling & Deadlock"]
+    },
+    {
+      "question_text": "1(d) A program containing a race condition will always/sometimes/never result in incorrect behavior?",
+      "correct_answer": "Sometimes",
+      "explanation": "Race conditions do not always manifest; the result depends on timing. A program may behave correctly during some executions even if a race exists.",
+      "difficulty": "easy",
+      "tags": ["Synchronization"]
+    },
+    {
+      "question_text": "1(e) A system meeting the four deadlock conditions will always/sometimes/never deadlock?",
+      "correct_answer": "Sometimes",
+      "explanation": "The presence of the four deadlock conditions enables deadlock but does not guarantee it. Deadlock may or may not occur depending on resource requests.",
+      "difficulty": "easy",
+      "tags": ["Scheduling & Deadlock"]
+    },
+
+    {
+      "question_text": "2(a) Categorize: Timer — interrupt, exception, or neither?",
+      "correct_answer": "Interrupt",
+      "explanation": "A timer event is generated asynchronously by hardware and is therefore an interrupt.",
+      "difficulty": "easy",
+      "tags": ["Architecture"]
+    },
+    {
+      "question_text": "2(b) Categorize: Segmentation violation — interrupt, exception, or neither?",
+      "correct_answer": "Exception",
+      "explanation": "Segmentation violations occur synchronously as a result of illegal memory access and therefore are exceptions.",
+      "difficulty": "easy",
+      "tags": ["Memory Management"]
+    },
+    {
+      "question_text": "2(c) Categorize: Keyboard input — interrupt, exception, or neither?",
+      "correct_answer": "Interrupt",
+      "explanation": "Keyboard input is an asynchronous hardware event that generates an interrupt.",
+      "difficulty": "easy",
+      "tags": ["Architecture"]
+    },
+    {
+      "question_text": "2(d) Categorize: Divide by zero — interrupt, exception, or neither?",
+      "correct_answer": "Exception",
+      "explanation": "Divide-by-zero faults occur synchronously due to program behavior, making them exceptions.",
+      "difficulty": "easy",
+      "tags": ["Architecture"]
+    },
+    {
+      "question_text": "2(e) Categorize: Procedure call — interrupt, exception, or neither?",
+      "correct_answer": "Neither",
+      "explanation": "A procedure call is a normal control-flow transition and neither an interrupt nor an exception.",
+      "difficulty": "easy",
+      "tags": ["Architecture"]
+    },
+    {
+      "question_text": "2(f) Categorize: System call — interrupt, exception, or neither?",
+      "correct_answer": "Exception",
+      "explanation": "System calls trap into the OS via a synchronous software exception.",
+      "difficulty": "easy",
+      "tags": ["Architecture"]
+    },
+
+    {
+      "question_text": "3. Discuss the tradeoffs between user and kernel threads. What are the advantages and disadvantages of each?",
+      "correct_answer": "User threads have fast switching but no true parallelism; kernel threads are slower but fully scheduled by the OS and can run in parallel.",
+      "explanation": "User threads avoid kernel involvement, so creation and switching are fast, but all threads in a process block if one makes a blocking system call. Kernel threads are managed by the OS, allowing independent scheduling and parallelism, but incur overhead for context switching and creation.",
+      "difficulty": "medium",
+      "tags": ["Processes & Threads", "Scheduling & Deadlock"]
+    },
+    {
+      "question_text": "3(b) If system calls were as fast as procedure calls, would one thread model be preferable?",
+      "correct_answer": "Kernel threads become preferable.",
+      "explanation": "If the main drawback of kernel threads—the cost of kernel transitions—disappears, their advantages (parallelism, independent scheduling) dominate.",
+      "difficulty": "medium",
+      "tags": ["Processes & Threads"]
+    },
+
+    {
+      "question_text": "4(a) Give an execution sequence where two cars travel in opposite directions on the bridge simultaneously using the unsynchronized code.",
+      "correct_answer": "North thread passes check then context switches; south thread also passes check; both increment num_cars and enter.",
+      "explanation": "Each thread checks the condition before num_cars is incremented. If both reach A.0 before either increments num_cars, both enter despite opposite directions.",
+      "difficulty": "medium",
+      "tags": ["Synchronization"]
+    },
+    {
+      "question_text": "4(b) Show how to correctly annotate the code using Lock and Condition.",
+      "correct_answer": "Use a lock around checks and updates; cars wait on cv until direction is open or matches their own; broadcast when num_cars reaches zero.",
+      "explanation": "Correct solution uses lock->Acquire(), cv->Wait(lock), and cv->Broadcast(lock) ensuring mutual exclusion and proper wakeup behavior.",
+      "difficulty": "hard",
+      "tags": ["Synchronization", "Semaphores & Monitors"]
+    },
+    {
+      "question_text": "4(c) Indicate which lines form critical sections.",
+      "correct_answer": "A.-1 to A.3 and D.-1 to D.5.",
+      "explanation": "All modifications of num_cars and cur_dir must be atomic and therefore belong in critical sections.",
+      "difficulty": "easy",
+      "tags": ["Synchronization"]
+    },
+    {
+      "question_text": "4(d) Can this solution lead to starvation?",
+      "correct_answer": "Yes",
+      "explanation": "If cars continuously arrive in one direction, cars in the opposite direction may wait forever.",
+      "difficulty": "easy",
+      "tags": ["Synchronization"]
+    },
+    {
+      "question_text": "4(e) Can this solution lead to deadlock?",
+      "correct_answer": "No",
+      "explanation": "There is no circular wait—cars going opposite directions cannot block simultaneously.",
+      "difficulty": "easy",
+      "tags": ["Synchronization"]
+    },
+
+    {
+      "question_text": "5(a) What does the test program print under round-robin scheduling with no priorities?",
+      "correct_answer": "fee foe foo far fie fum fun",
+      "explanation": "Main prints 'fee foe'; A prints 'foo far'; B prints 'fie'; A prints 'fum'; main prints 'fun'. This sequence follows FIFO and blocking semantics.",
+      "difficulty": "medium",
+      "tags": ["Processes & Threads"]
+    },
+    {
+      "question_text": "5(b) What does the test program print when threads are scheduled using priorities?",
+      "correct_answer": "fee foo fie far fum foe fun",
+      "explanation": "High-priority A and B preempt the main thread after creation. Output reflects immediate execution of higher priority threads.",
+      "difficulty": "hard",
+      "tags": ["Processes & Threads", "Scheduling & Deadlock"]
+    }
+
+  ]
+}
