@@ -9,8 +9,8 @@
  * ✅ useTopic - Fetch single topic
  */
 
-import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
-import { fetchCourses, fetchCourse, fetchTopics, fetchTopic } from '@/lib/api'
+import { useQuery, useSuspenseQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { fetchCourses, fetchCourse, fetchTopics, fetchTopic, createCourse } from '@/lib/api'
 import { queryKeys } from '@/lib/queryClient'
 
 /**
@@ -70,5 +70,21 @@ export function useTopic(topicId: string | undefined) {
     queryFn: () => fetchTopic(topicId!),
     enabled: !!topicId,
     staleTime: 10 * 60 * 1000,
+  })
+}
+
+/**
+ * ✅ IMPLEMENTED: Create a new course
+ * Invalidates courses query after success
+ */
+export function useCreateCourse() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ code, name, term }: { code: string; name: string; term?: string }) =>
+      createCourse(code, name, term),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.courses.all })
+    },
   })
 }

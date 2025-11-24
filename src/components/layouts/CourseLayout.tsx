@@ -36,7 +36,7 @@ export default function CourseLayout() {
             <Link to="/courses">
               <Button variant="ghost" size="sm">
                 <ChevronLeft className="h-4 w-4 mr-1" />
-                Courses
+                Back To Courses
               </Button>
             </Link>
             {course && (

@@ -49,7 +49,7 @@ export default function ExamDefinition() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="max-w-2xl w-full bg-white rounded-lg shadow-lg p-8">
-        <h1 className="text-3xl font-bold mb-4">{exam.name}</h1>
+        <h1 className="text-3xl font-bold mb-4 text-gray-900">{exam.name}</h1>
 
         <div className="mb-6 space-y-2">
           <p className="text-gray-600">
@@ -60,8 +60,8 @@ export default function ExamDefinition() {
           </p>
         </div>
 
-        <div className="mb-6">
-          <h2 className="text-xl font-semibold mb-2">Instructions</h2>
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold mb-2 text-gray-900">Instructions</h2>
           <p className="text-gray-700">
             This exam will test your knowledge on the course material.
             You will have {exam.duration_min} minutes to complete all questions.
@@ -69,18 +69,18 @@ export default function ExamDefinition() {
           </p>
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex flex-col sm:flex-row gap-4 pt-4 border-t border-gray-200">
           <button
             onClick={() => navigate(-1)}
-            className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+            className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 font-medium transition-all"
           >
             Cancel
           </button>
           <button
             onClick={handleStartExam}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="flex-1 px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-semibold text-lg shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
           >
-            Start Exam
+            🚀 Start Exam
           </button>
         </div>
       </div>

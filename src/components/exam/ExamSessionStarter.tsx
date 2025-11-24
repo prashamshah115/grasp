@@ -154,10 +154,22 @@ export function ExamSessionStarter() {
     )
   }
 
-  // Default loading state
+  // Default loading state - show a start button if session creation hasn't started
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center">
-      <Loader2 className="w-12 h-12 animate-spin text-[#4F46E5]" />
+    <div className="min-h-screen bg-white flex items-center justify-center p-4">
+      <div className="max-w-md w-full text-center">
+        <Loader2 className="w-12 h-12 animate-spin text-[#4F46E5] mx-auto mb-4" />
+        <h2 className="text-2xl font-semibold text-[#111827] mb-2">Preparing Exam...</h2>
+        <p className="text-[#6B7280] mb-6">
+          Please wait while we set up your exam session.
+        </p>
+        <button
+          onClick={() => startSession()}
+          className="px-6 py-3 bg-[#4F46E5] text-white rounded-[12px] font-medium hover:bg-[#4338CA] transition-all"
+        >
+          Start Exam Now
+        </button>
+      </div>
     </div>
   )
 }

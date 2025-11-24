@@ -100,15 +100,40 @@ export function CompressionView() {
   const selectedTopic = topics?.find((t) => t.id === selectedTopicId)
 
   const handleGenerate = async () => {
-    if (!selectedTopicId || !user?.id) return
+    if (!selectedTopicId || !user?.id) {
+      console.error('Cannot generate compression: missing topicId or userId')
+      return
+    }
 
     try {
-      await generateCompression.mutateAsync({
+      const result = await generateCompression.mutateAsync({
         user_id: user.id,
         topic_id: selectedTopicId,
       })
-    } catch (error) {
+      
+      if (result && result.content) {
+        // Success - query will be invalidated automatically by the mutation
+        console.log('Compression generated successfully')
+      }
+    } catch (error: any) {
       console.error('Failed to generate compression:', error)
+      
+      // Show user-friendly error message based on error type
+      let errorMsg = 'Failed to generate compression notes'
+      
+      if (error?.message) {
+        if (error.message.includes('No documents found') || error.message.includes('404')) {
+          errorMsg = 'No course materials found for this topic. Compression uses existing documents in the database - please upload course materials first or check if documents exist for this course.'
+        } else if (error.message.includes('rate limit') || error.message.includes('429')) {
+          errorMsg = 'Rate limit exceeded. Please wait a moment and try again.'
+        } else if (error.message.includes('API') || error.message.includes('credits') || error.message.includes('quota')) {
+          errorMsg = 'AI service temporarily unavailable. This may be due to API credits. Please try again later or contact support.'
+        } else {
+          errorMsg = error.message
+        }
+      }
+      
+      alert(`Error: ${errorMsg}`)
     }
   }
 

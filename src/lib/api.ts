@@ -54,6 +54,7 @@ async function requireAuth() {
 
 /**
  * ✅ IMPLEMENTED: Fetch all courses
+ * Filters out test courses
  */
 export async function fetchCourses() {
   const { data, error } = await supabase
@@ -62,7 +63,17 @@ export async function fetchCourses() {
     .order('code', { ascending: true })
 
   if (error) handleSupabaseError(error)
-  return data || []
+  
+  // Filter out test courses
+  const filtered = (data || []).filter((course) => {
+    const isTestCourse = 
+      course.id === '11111111-1111-1111-1111-111111111111' ||
+      course.name?.toLowerCase().includes('test course') ||
+      course.code?.toLowerCase().includes('test');
+    return !isTestCourse;
+  });
+  
+  return filtered
 }
 
 /**
@@ -76,6 +87,39 @@ export async function fetchCourse(courseId: string) {
     .single()
 
   if (error) handleSupabaseError(error)
+  return data
+}
+
+/**
+ * ✅ IMPLEMENTED: Create a new course
+ */
+export async function createCourse(code: string, name: string, term?: string) {
+  const user = await requireAuth()
+  
+  if (!code || !name) {
+    throw new ValidationError('Course code and name are required')
+  }
+  
+  const { data, error } = await supabase
+    .from('courses')
+    .insert({
+      code: code.trim().toUpperCase(),
+      name: name.trim(),
+      term: term || null,
+    })
+    .select()
+    .single()
+
+  if (error) handleSupabaseError(error)
+  
+  // Auto-enroll user in the course they just created
+  try {
+    await addUserCourse(data.id)
+  } catch (enrollError) {
+    console.error('Failed to auto-enroll in created course:', enrollError)
+    // Don't throw - course was created successfully
+  }
+  
   return data
 }
 
@@ -351,7 +395,7 @@ export async function fetchExamSession(sessionId: string) {
  * ✅ IMPLEMENTED: Get active exam sessions for a course
  * Used for exam resumption feature
  */
-export async export async function getActiveExamSessions(courseId: string) {
+export async function getActiveExamSessions(courseId: string) {
   const user = await requireAuth()
 
   const { data, error } = await supabase
@@ -578,17 +622,47 @@ export async function submitExam(request: SubmitExamRequest): Promise<SubmitExam
 export async function ragChat(request: RAGChatRequest): Promise<RAGChatResponse> {
   const user = await requireAuth()
 
-  return safeInvoke<RAGChatResponse>(
-    'rag-chat',
-    {
-      body: {
-        message: request.message,
-        topicId: request.topic_id,
-        courseId: request.course_id,
-        questionId: request.question_id,
-      },
-    }
-  )
+  console.log('[ragChat] Calling edge function with request:', {
+    message: request.message?.substring(0, 50),
+    topicId: request.topic_id,
+    courseId: request.course_id,
+    questionId: request.question_id,
+    userId: user.id,
+  })
+
+  try {
+    // Normalize empty strings to null/undefined for UUID fields
+    const normalizedTopicId = request.topic_id && request.topic_id.trim() !== '' ? request.topic_id : undefined
+    const normalizedCourseId = request.course_id && request.course_id.trim() !== '' ? request.course_id : undefined
+    const normalizedQuestionId = request.question_id && request.question_id.trim() !== '' ? request.question_id : undefined
+
+    const result = await safeInvoke<RAGChatResponse>(
+      'rag-chat',
+      {
+        body: {
+          message: request.message,
+          topicId: normalizedTopicId,
+          courseId: normalizedCourseId,
+          questionId: normalizedQuestionId,
+        },
+      }
+    )
+    console.log('[ragChat] Success! Got response:', {
+      answerLength: result.answer?.length,
+      citationsCount: result.citations?.length,
+      pagesCount: result.pages?.length,
+    })
+    return result
+  } catch (error: any) {
+    console.error('[ragChat] Edge function call failed:', {
+      error: error.message,
+      status: error.status,
+      code: error.code,
+      context: error.context,
+      stack: error.stack,
+    })
+    throw error
+  }
 }
 
 /**
@@ -646,14 +720,36 @@ export async function generateCompression(
 ): Promise<GenerateCompressionResponse> {
   const user = await requireAuth()
 
-  return safeInvoke<GenerateCompressionResponse>(
-    'generate-compression',
-    {
-      body: {
-        topicId: request.topic_id,
-      },
-    }
-  )
+  console.log('[generateCompression] Calling edge function with request:', {
+    topicId: request.topic_id,
+    userId: request.user_id,
+    actualUserId: user.id,
+  })
+
+  try {
+    const result = await safeInvoke<GenerateCompressionResponse>(
+      'generate-compression',
+      {
+        body: {
+          topicId: request.topic_id,
+        },
+      }
+    )
+    console.log('[generateCompression] Success! Got response:', {
+      contentLength: result.content?.length,
+      topicId: result.topic_id,
+    })
+    return result
+  } catch (error: any) {
+    console.error('[generateCompression] Edge function call failed:', {
+      error: error.message,
+      status: error.status,
+      code: error.code,
+      context: error.context,
+      stack: error.stack,
+    })
+    throw error
+  }
 }
 
 /**
@@ -741,6 +837,7 @@ export async function ingestDocument(documentId: string) {
 
 /**
  * Fetch user's enrolled courses
+ * Filters out test course enrollments
  */
 export async function fetchUserCourses() {
   const user = await requireAuth()
@@ -751,7 +848,20 @@ export async function fetchUserCourses() {
     .eq('user_id', user.id)
 
   if (error) handleSupabaseError(error)
-  return data
+  
+  // Filter out test course enrollments
+  const filtered = (data || []).filter((uc: any) => {
+    const course = uc.courses;
+    if (!course) return false;
+    
+    const isTestCourse = 
+      course.id === '11111111-1111-1111-1111-111111111111' ||
+      course.name?.toLowerCase().includes('test course') ||
+      course.code?.toLowerCase().includes('test');
+    return !isTestCourse;
+  });
+  
+  return filtered
 }
 
 /**

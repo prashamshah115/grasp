@@ -63,6 +63,12 @@ serve(async (req) => {
   }
 
   try {
+    console.log(`[${FUNCTION_NAME}] Request received:`, {
+      method: req.method,
+      url: req.url,
+      headers: Object.fromEntries(req.headers.entries()),
+    })
+
     // Authenticate user and get properly configured Supabase client
     // This uses the CORRECT Supabase v2 pattern for Edge Functions
     const { supabase, user } = await requireAuth(req)
@@ -80,9 +86,13 @@ serve(async (req) => {
     // Safe JSON parsing with error handling
     let body: CompressionRequest
     try {
-      body = await req.json() as CompressionRequest
+      const rawBody = await req.text()
+      console.log(`[${FUNCTION_NAME}] Raw request body:`, rawBody)
+      body = JSON.parse(rawBody) as CompressionRequest
+      console.log(`[${FUNCTION_NAME}] Parsed body:`, body)
     } catch (error) {
-      throw new ValidationError('Invalid JSON in request body')
+      console.error(`[${FUNCTION_NAME}] JSON parse error:`, error)
+      throw new ValidationError(`Invalid JSON in request body: ${error instanceof Error ? error.message : String(error)}`)
     }
 
     // Input validation
@@ -111,7 +121,22 @@ serve(async (req) => {
     const courseId = topic.course_id
     console.log(`[${FUNCTION_NAME}] Found course_id: ${courseId} for topic ${topicId}`)
 
+    // Check if user is enrolled in the course
+    const { data: enrollment } = await supabase
+      .from('user_courses')
+      .select('course_id')
+      .eq('user_id', user.id)
+      .eq('course_id', courseId)
+      .maybeSingle()
+    
+    const isEnrolled = !!enrollment
+    console.log(`[${FUNCTION_NAME}] User enrollment check:`, isEnrolled)
+
     // STEP 2: Grab all document pages for this topic OR course (handles NULL topic_id)
+    // RLS policies handle access control automatically:
+    // - owner_user_id IS NULL (public documents)
+    // - owner_user_id = auth.uid() (user's own documents)
+    // - User is enrolled in the course
     // First try topic-specific documents, then fall back to course documents
     let { data: pages, error: pagesError } = await supabase
       .from('document_pages')
@@ -128,8 +153,6 @@ serve(async (req) => {
       `)
       .eq('documents.course_id', courseId)
       .eq('documents.topic_id', topicId)
-      .or(`owner_user_id.is.null,owner_user_id.eq.${user.id}`, { foreignTable: 'documents' })
-      .order('documents.id', { ascending: true })
       .order('page_number', { ascending: true })
       .limit(50)
 
@@ -151,8 +174,6 @@ serve(async (req) => {
         `)
         .eq('documents.course_id', courseId)
         .is('documents.topic_id', null)
-        .or(`owner_user_id.is.null,owner_user_id.eq.${user.id}`, { foreignTable: 'documents' })
-        .order('documents.id', { ascending: true })
         .order('page_number', { ascending: true })
         .limit(50)
 
@@ -166,7 +187,13 @@ serve(async (req) => {
     }
 
     if (pagesError) {
-      console.error(`[${FUNCTION_NAME}] Pages error:`, pagesError)
+      console.error(`[${FUNCTION_NAME}] Pages error:`, {
+        message: pagesError.message,
+        code: pagesError.code,
+        details: pagesError.details,
+        hint: pagesError.hint,
+        stack: pagesError.stack,
+      })
       throw pagesError
     }
     
@@ -347,6 +374,8 @@ Generate the compression notes now:`
     } as CompressionResponse)
 
   } catch (error) {
+    console.error(`[${FUNCTION_NAME}] Unhandled error:`, error)
+    console.error(`[${FUNCTION_NAME}] Error stack:`, error instanceof Error ? error.stack : 'No stack')
     return handleError(error, FUNCTION_NAME)
   }
 })

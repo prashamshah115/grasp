@@ -6,16 +6,16 @@
 -- =====================================================
 -- 1. INSERT SAMPLE COURSE
 -- =====================================================
-
-INSERT INTO courses (id, code, name, term, description, instructor) VALUES
-(
-  '11111111-1111-1111-1111-111111111111',
-  'CSE 120',
-  'Operating Systems',
-  'Fall 2024',
-  'Introduction to operating systems: processes, threads, scheduling, memory management, file systems',
-  'Prof. Smith'
-) ON CONFLICT (id) DO NOTHING;
+-- NOTE: Test course removed - uncomment below to add test course back
+-- INSERT INTO courses (id, code, name, term, description, instructor) VALUES
+-- (
+--   '11111111-1111-1111-1111-111111111111',
+--   'CSE 120',
+--   'Operating Systems',
+--   'Fall 2024',
+--   'Introduction to operating systems: processes, threads, scheduling, memory management, file systems',
+--   'Prof. Smith'
+-- ) ON CONFLICT (id) DO NOTHING;
 
 -- =====================================================
 -- 2. INSERT TOPICS

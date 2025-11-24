@@ -89,20 +89,6 @@ export function CourseHome() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Header */}
-      <header className="px-8 py-6 border-b border-[#E5E7EB]">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <button
-            onClick={handleBack}
-            className="flex items-center gap-2 text-[#6B7280] hover:text-[#111827] transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            <span>Back to Catalog</span>
-          </button>
-          <h1 className="text-xl tracking-tight">grasp.ai</h1>
-        </div>
-      </header>
-
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-8 py-20">
         {/* Course Header */}

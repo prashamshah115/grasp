@@ -12,12 +12,6 @@
         mainFields: ['module', 'main'],
       },
     },
-    build: {
-      commonjsOptions: {
-        include: [/warning/, /node_modules/],
-        transformMixedEsModules: true,
-      },
-    },
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {
@@ -65,6 +59,10 @@
     build: {
       target: 'esnext',
       outDir: 'build',
+      commonjsOptions: {
+        include: [/warning/, /node_modules/],
+        transformMixedEsModules: true,
+      },
     },
     server: {
       port: 3000,

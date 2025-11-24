@@ -8,9 +8,9 @@
  * - NO props, NO mock data
  */
 
-import { FileUp, User, LogOut } from 'lucide-react';
+import { FileUp, User, LogOut, Plus, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useCourses, useUserCourses, useAddCourse, useUploadCourseMaterial } from '@/hooks';
+import { useCourses, useUserCourses, useAddCourse, useUploadCourseMaterial, useCreateCourse } from '@/hooks';
 import LoadingScreen from './LoadingScreen';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useState, useRef } from 'react';
@@ -29,9 +29,14 @@ export function CourseCatalog() {
   const { user, signOut } = useAuth();
   const addCourse = useAddCourse();
   const uploadCourseMaterial = useUploadCourseMaterial();
+  const createCourseMutation = useCreateCourse();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newCourseCode, setNewCourseCode] = useState('');
+  const [newCourseName, setNewCourseName] = useState('');
+  const [newCourseTerm, setNewCourseTerm] = useState('');
 
   const isLoading = coursesLoading || userCoursesLoading;
 
@@ -77,15 +82,46 @@ export function CourseCatalog() {
     }
   };
 
-  const handleUploadClick = () => {
-    // Check if user has enrolled courses
-    if (!userCourses || userCourses.length === 0) {
-      alert('Please enroll in a course first before uploading materials.');
+  const handleCreateCourse = async () => {
+    if (!newCourseCode.trim() || !newCourseName.trim()) {
+      alert('Please enter both course code and name');
       return;
     }
 
-    // If only one course, use it; otherwise require selection
-    if (userCourses.length === 1) {
+    try {
+      const course = await createCourseMutation.mutateAsync({
+        code: newCourseCode.trim(),
+        name: newCourseName.trim(),
+        term: newCourseTerm.trim() || undefined,
+      });
+      
+      // Close modal and reset form
+      setShowCreateModal(false);
+      setNewCourseCode('');
+      setNewCourseName('');
+      setNewCourseTerm('');
+      
+      // Navigate to the new course
+      navigate(`/course/${course.id}`);
+    } catch (error: any) {
+      console.error('Failed to create course:', error);
+      alert(`Failed to create course: ${error.message || 'Please try again.'}`);
+    }
+  };
+
+  const handleUploadClick = () => {
+    // Check if user has enrolled courses OR if there are courses available
+    // Allow upload if user has enrolled courses OR if there are courses in the catalog
+    const hasEnrolledCourses = userCourses && userCourses.length > 0;
+    const hasAvailableCourses = courses && courses.length > 0;
+    
+    if (!hasEnrolledCourses && !hasAvailableCourses) {
+      alert('Please create or enroll in a course first before uploading materials.');
+      return;
+    }
+
+    // If user has enrolled courses, use the first one
+    if (hasEnrolledCourses) {
       const course = userCourses[0] as UserCourseWithDetails;
       if (!course?.course_id) {
         alert('Invalid course data');
@@ -93,15 +129,14 @@ export function CourseCatalog() {
       }
       setSelectedCourseId(course.course_id);
       fileInputRef.current?.click();
-    } else {
-      // For multiple courses, show selection (for now, use first enrolled course)
+    } else if (hasAvailableCourses && courses.length === 1) {
+      // If only one course available, use it
+      setSelectedCourseId(courses[0].id);
+      fileInputRef.current?.click();
+    } else if (hasAvailableCourses) {
+      // Multiple courses available - use first one for now
       // TODO: Add course selection UI
-      const course = userCourses[0] as UserCourseWithDetails;
-      if (!course?.course_id) {
-        alert('Invalid course data');
-        return;
-      }
-      setSelectedCourseId(course.course_id);
+      setSelectedCourseId(courses[0].id);
       fileInputRef.current?.click();
     }
   };
@@ -130,9 +165,10 @@ export function CourseCatalog() {
         fileInputRef.current.value = '';
       }
       setSelectedCourseId(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Upload failed:', error);
-      alert('Failed to upload course material. Please try again.');
+      const errorMsg = error?.message || 'Failed to upload course material. Please try again.';
+      alert(`Upload failed: ${errorMsg}`);
     } finally {
       setIsUploading(false);
     }
@@ -181,7 +217,28 @@ export function CourseCatalog() {
 
         {/* Course Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {courses?.map((course) => {
+          {/* Create New Course Card */}
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] border-2 border-transparent rounded-[14px] p-8 text-left hover:shadow-lg transition-all duration-200 flex flex-col items-center justify-center min-h-[280px] text-white"
+          >
+            <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center mb-4">
+              <Plus className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl mb-2 text-center font-medium">Create New Course</h3>
+            <p className="text-sm text-white/80 text-center max-w-xs">
+              Start a new course and add your materials
+            </p>
+          </button>
+
+          {courses?.filter((course) => {
+            // Filter out test courses (identified by test UUID pattern or "Test Course" name)
+            const isTestCourse = 
+              course.id === '11111111-1111-1111-1111-111111111111' ||
+              course.name?.toLowerCase().includes('test course') ||
+              course.code?.toLowerCase().includes('test');
+            return !isTestCourse;
+          }).map((course) => {
             const isEnrolled = enrolledCourseIds.has(course.id);
             return (
               <div
@@ -205,21 +262,30 @@ export function CourseCatalog() {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center justify-between">
-                  <button
-                    onClick={() => handleViewCourse(course.id)}
-                    className="text-sm text-[#4F46E5] hover:text-[#4338CA]"
-                  >
-                    Start Final Prep →
-                  </button>
-                  {!isEnrolled && (
+                <div className="flex items-center justify-between gap-4">
+                  {isEnrolled ? (
                     <button
-                      onClick={(e) => handleAddCourse(course.id, e)}
-                      disabled={addCourse.isPending}
-                      className="px-3 py-1 text-xs bg-[#F3F4F6] text-[#374151] rounded hover:bg-[#E5E7EB] disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => handleViewCourse(course.id)}
+                      className="text-sm text-[#4F46E5] hover:text-[#4338CA] font-medium"
                     >
-                      {addCourse.isPending ? 'Adding...' : '+ Add'}
+                      Start Final Prep →
                     </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => handleViewCourse(course.id)}
+                        className="text-sm text-[#6B7280] hover:text-[#374151]"
+                      >
+                        View Course →
+                      </button>
+                      <button
+                        onClick={(e) => handleAddCourse(course.id, e)}
+                        disabled={addCourse.isPending}
+                        className="px-4 py-2 text-sm font-medium bg-[#4F46E5] text-white rounded-[8px] hover:bg-[#4338CA] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                      >
+                        {addCourse.isPending ? 'Enrolling...' : 'Enroll'}
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -255,6 +321,90 @@ export function CourseCatalog() {
           className="hidden"
         />
       </main>
+
+      {/* Create Course Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[16px] p-8 max-w-md w-full shadow-xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-semibold">Create New Course</h2>
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setNewCourseCode('');
+                  setNewCourseName('');
+                  setNewCourseTerm('');
+                }}
+                className="p-2 hover:bg-[#F9FAFB] rounded-[8px] transition-colors"
+              >
+                <X className="w-5 h-5 text-[#6B7280]" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-[#374151] mb-2">
+                  Course Code <span className="text-[#EF4444]">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newCourseCode}
+                  onChange={(e) => setNewCourseCode(e.target.value)}
+                  placeholder="e.g., CSE 120"
+                  className="w-full px-4 py-3 border border-[#E5E7EB] rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#374151] mb-2">
+                  Course Name <span className="text-[#EF4444]">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newCourseName}
+                  onChange={(e) => setNewCourseName(e.target.value)}
+                  placeholder="e.g., Operating Systems"
+                  className="w-full px-4 py-3 border border-[#E5E7EB] rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#374151] mb-2">
+                  Term (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={newCourseTerm}
+                  onChange={(e) => setNewCourseTerm(e.target.value)}
+                  placeholder="e.g., Fall 2024"
+                  className="w-full px-4 py-3 border border-[#E5E7EB] rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setNewCourseCode('');
+                  setNewCourseName('');
+                  setNewCourseTerm('');
+                }}
+                className="flex-1 px-4 py-3 border border-[#E5E7EB] text-[#374151] rounded-[10px] hover:bg-[#F9FAFB] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateCourse}
+                disabled={!newCourseCode.trim() || !newCourseName.trim() || createCourseMutation.isPending}
+                className="flex-1 px-4 py-3 bg-[#4F46E5] text-white rounded-[10px] hover:bg-[#4338CA] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {createCourseMutation.isPending ? 'Creating...' : 'Create Course'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

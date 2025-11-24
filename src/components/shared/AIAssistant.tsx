@@ -9,7 +9,13 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  citations?: string[];
+  citations?: Array<{
+    documentTitle: string;
+    pageNumber: number;
+    similarity: number;
+    docType: string;
+    publicUrl?: string;
+  }>;
   pages?: Array<{ doc_title: string; page_number: number }>;
 }
 
@@ -132,13 +138,18 @@ export function AIAssistant({
 
     // Call real RAG API with full context
     try {
+      // Don't send empty strings - use undefined instead (edge function expects null/undefined, not empty strings)
       const response = await chatMutation.mutateAsync({
         user_id: user.id,
-        topic_id: topicId || '',
-        course_id: courseId || urlCourseId || '',
-        question_id: questionId || '',
+        topic_id: topicId || undefined,
+        course_id: courseId || urlCourseId || undefined,
+        question_id: questionId || undefined,
         message: messageText,
       });
+
+      if (!response || !response.answer) {
+        throw new Error('Invalid response from AI assistant');
+      }
 
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -149,12 +160,32 @@ export function AIAssistant({
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiMessage]);
-    } catch (error) {
+    } catch (error: any) {
       console.error('RAG chat error:', error);
+      
+      // Provide more helpful error messages
+      let errorContent = 'Sorry, I encountered an error processing your message. Please try again.';
+      
+      if (error?.message) {
+        if (error.message.includes('network') || error.message.includes('fetch')) {
+          errorContent = 'Network error: Please check your internet connection and try again.';
+        } else if (error.message.includes('401') || error.message.includes('unauthorized')) {
+          errorContent = 'Authentication error: Please refresh the page and try again.';
+        } else if (error.message.includes('429') || error.message.includes('rate limit')) {
+          errorContent = 'Rate limit exceeded: Please wait a moment and try again.';
+        } else if (error.message.includes('500') || error.message.includes('server')) {
+          errorContent = 'Server error: Our AI service is temporarily unavailable. Please try again in a moment.';
+        } else if (error.message.includes('API') || error.message.includes('credits') || error.message.includes('quota') || error.message.includes('billing')) {
+          errorContent = 'AI service unavailable: This may be due to API credits or billing issues. Please try again later or contact support.';
+        } else if (error.message.includes('Failed to invoke')) {
+          errorContent = 'AI service error: The AI assistant is temporarily unavailable. This may be due to API credits or service issues. Please try again later.';
+        }
+      }
+      
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'Sorry, I encountered an error processing your message. Please try again.',
+        content: errorContent,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -248,7 +279,13 @@ export function AIAssistant({
                   <div className="text-xs text-[#6B7280] font-medium mb-1">Sources:</div>
                   <div className="text-xs text-[#9CA3AF] space-y-1">
                     {message.citations.map((citation, idx) => (
-                      <div key={idx}>{citation}</div>
+                      <div key={idx} className="flex items-start gap-2">
+                        <span className="text-[#4F46E5] font-medium">{citation.documentTitle}</span>
+                        <span>• Page {citation.pageNumber}</span>
+                        {citation.similarity && (
+                          <span>• {(citation.similarity * 100).toFixed(0)}% match</span>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </div>

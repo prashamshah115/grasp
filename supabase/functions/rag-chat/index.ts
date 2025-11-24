@@ -121,6 +121,12 @@ serve(async (req) => {
   }
 
   try {
+    console.log(`[${FUNCTION_NAME}] Request received:`, {
+      method: req.method,
+      url: req.url,
+      headers: Object.fromEntries(req.headers.entries()),
+    })
+
     // Authenticate user and get properly configured Supabase client
     // This uses the CORRECT Supabase v2 pattern for Edge Functions
     const { supabase, user } = await requireAuth(req)
@@ -138,9 +144,18 @@ serve(async (req) => {
     // Safe JSON parsing with error handling
     let body: RAGRequest
     try {
-      body = await req.json() as RAGRequest
+      const rawBody = await req.text()
+      console.log(`[${FUNCTION_NAME}] Raw request body:`, rawBody.substring(0, 200))
+      body = JSON.parse(rawBody) as RAGRequest
+      console.log(`[${FUNCTION_NAME}] Parsed body:`, {
+        message: body.message?.substring(0, 50),
+        topicId: body.topicId,
+        courseId: body.courseId,
+        questionId: body.questionId,
+      })
     } catch (error) {
-      throw new ValidationError('Invalid JSON in request body')
+      console.error(`[${FUNCTION_NAME}] JSON parse error:`, error)
+      throw new ValidationError(`Invalid JSON in request body: ${error instanceof Error ? error.message : String(error)}`)
     }
 
     // Input validation
@@ -150,11 +165,16 @@ serve(async (req) => {
 
     const { message, topicId, courseId, questionId } = body
 
+    // Convert empty strings to null for UUID fields
+    const normalizedTopicId = topicId && topicId.trim() !== '' ? topicId : null
+    const normalizedCourseId = courseId && courseId.trim() !== '' ? courseId : null
+    const normalizedQuestionId = questionId && questionId.trim() !== '' ? questionId : null
+
     console.log(`[${FUNCTION_NAME}] Request:`, {
       userId: user.id,
-      topicId,
-      courseId,
-      questionId,
+      topicId: normalizedTopicId,
+      courseId: normalizedCourseId,
+      questionId: normalizedQuestionId,
       message: message.substring(0, 80)
     })
 
@@ -172,30 +192,77 @@ serve(async (req) => {
     // ------------------------------------------
     console.log('[rag-chat] Searching documents...')
 
-    const { data: pages, error: searchError } = await supabase.rpc(
+    // Check if user is enrolled in the course (if courseId provided)
+    let isEnrolled = false
+    if (normalizedCourseId) {
+      const { data: enrollment } = await supabase
+        .from('user_courses')
+        .select('course_id')
+        .eq('user_id', user.id)
+        .eq('course_id', normalizedCourseId)
+        .maybeSingle()
+      isEnrolled = !!enrollment
+      console.log(`[rag-chat] User enrollment check for course ${normalizedCourseId}:`, isEnrolled)
+    }
+
+    // Try vector search - RLS policies will handle access control
+    // The RPC function should return documents where user has access (public, own, or enrolled course)
+    let { data: pages, error: searchError } = await supabase.rpc(
       'search_document_pages',
       {
         query_embedding: queryEmbedding,
-        filter_course_id: courseId ?? null,
-        filter_topic_id: topicId ?? null,
-        filter_user_id: user.id,
-        match_threshold: 0.7,
-        match_count: 10
+        filter_course_id: normalizedCourseId,
+        filter_topic_id: normalizedTopicId,
+        filter_user_id: user.id, // Pass user ID but RLS will allow access to public/enrolled docs
+        match_threshold: 0.6, // Lower threshold to get more results
+        match_count: 15 // Increase count
       }
     )
 
     if (searchError) {
       console.error('[rag-chat] Vector search error:', searchError)
-      throw searchError
+      // Log but don't throw - will check for documents below
     }
 
     console.log('[rag-chat] Found', pages?.length || 0, 'pages')
 
-    // No matching pages → fallback message
+    // No matching pages → check if documents exist for this course/topic
     if (!pages || pages.length === 0) {
+      // Check if documents exist at all for this course/topic (RLS will filter automatically)
+      let docCheckQuery = supabase
+        .from('documents')
+        .select('id, title, course_id, topic_id, owner_user_id')
+        .limit(5)
+
+      if (normalizedCourseId) {
+        docCheckQuery = docCheckQuery.eq('course_id', normalizedCourseId)
+      }
+      if (normalizedTopicId) {
+        docCheckQuery = docCheckQuery.eq('topic_id', normalizedTopicId)
+      }
+
+      const { data: docCheck, error: docCheckError } = await docCheckQuery
+
+      console.log(`[rag-chat] Document check: found ${docCheck?.length || 0} documents`, {
+        courseId,
+        topicId,
+        isEnrolled,
+        error: docCheckError?.message
+      })
+
+      if (docCheck && docCheck.length > 0) {
+        // Documents exist but no matching embeddings - might need processing
+        return successResponse({
+          answer:
+            "I found course materials but couldn't match them to your question. This might mean:\n\n1. Documents are still being processed (embeddings not generated yet)\n2. Your question doesn't match the content closely enough\n3. Try rephrasing your question or wait a few minutes for processing to complete.",
+          citations: [],
+          pages: []
+        } as RAGResponse)
+      }
+
       return successResponse({
         answer:
-          "I don't have enough context to answer this yet. Upload course materials or documents for this topic.",
+          "I don't have enough context to answer this yet. Please upload course materials or documents for this topic. Once uploaded, documents will be processed automatically.",
         citations: [],
         pages: []
       } as RAGResponse)
@@ -220,33 +287,33 @@ serve(async (req) => {
     let topicName = null
     let questionPrompt = null
     
-    if (courseId) {
+    if (normalizedCourseId) {
       const { data: course } = await supabase
         .from('courses')
         .select('name, code')
-        .eq('id', courseId)
+        .eq('id', normalizedCourseId)
         .single()
       if (course) {
         courseName = `${course.code}: ${course.name}`
       }
     }
     
-    if (topicId) {
+    if (normalizedTopicId) {
       const { data: topic } = await supabase
         .from('topics')
         .select('name')
-        .eq('id', topicId)
+        .eq('id', normalizedTopicId)
         .single()
       if (topic) {
         topicName = topic.name
       }
     }
     
-    if (questionId) {
+    if (normalizedQuestionId) {
       const { data: question } = await supabase
         .from('questions')
         .select('prompt')
-        .eq('id', questionId)
+        .eq('id', normalizedQuestionId)
         .single()
       if (question) {
         questionPrompt = question.prompt
@@ -324,6 +391,8 @@ Remember: Your goal is to help students achieve deep understanding, not just pro
     } as RAGResponse)
 
   } catch (error) {
+    console.error(`[${FUNCTION_NAME}] Unhandled error:`, error)
+    console.error(`[${FUNCTION_NAME}] Error stack:`, error instanceof Error ? error.stack : 'No stack')
     return handleError(error, FUNCTION_NAME)
   }
 })

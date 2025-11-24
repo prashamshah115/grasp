@@ -27,7 +27,13 @@ export interface RAGChatRequest {
 
 export interface RAGChatResponse {
   answer: string
-  citations: string[]
+  citations: Array<{
+    documentTitle: string
+    pageNumber: number
+    similarity: number
+    docType: string
+    publicUrl?: string
+  }>
   pages: Array<{
     id: string
     title: string

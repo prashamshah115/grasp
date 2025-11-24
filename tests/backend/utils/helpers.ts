@@ -253,9 +253,15 @@ export async function waitForCondition(
  * Clean up test user
  */
 export async function cleanupTestUser(user: TestUser): Promise<void> {
+  const config = getConfig()
+  
+  if (!config.supabaseServiceRoleKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is required for user cleanup')
+  }
+  
   const serviceClient = createClient(
-    TEST_CONFIG.supabaseUrl,
-    TEST_CONFIG.supabaseServiceRoleKey
+    config.supabaseUrl,
+    config.supabaseServiceRoleKey
   )
 
   await serviceClient.auth.admin.deleteUser(user.id)
