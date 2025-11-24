@@ -3,7 +3,6 @@
 // Called by: useRAGChat hook in frontend
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '../_shared/rate-limit.ts'
 import {
   handleError,
@@ -93,8 +92,11 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
       ],
-      temperature: 0.3,
-      max_tokens: 500
+      temperature: 0.4, // Slightly higher for more natural, varied explanations
+      max_tokens: 1500, // Increased for comprehensive explanations
+      top_p: 0.9, // Nucleus sampling for better quality
+      frequency_penalty: 0.1, // Reduce repetition
+      presence_penalty: 0.1 // Encourage diverse topics
     })
   })
 
@@ -119,13 +121,9 @@ serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get('PUBLIC_SUPABASE_URL')!,
-      Deno.env.get('SERVICE_ROLE_KEY')!
-    )
-
-    // Authenticate user (uses centralized error handling with CORS)
-    const { user } = await requireAuth(req, supabase)
+    // Authenticate user and get properly configured Supabase client
+    // This uses the CORRECT Supabase v2 pattern for Edge Functions
+    const { supabase, user } = await requireAuth(req)
     console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
 
     // Rate limiting check
@@ -214,20 +212,90 @@ serve(async (req) => {
       .join('\n\n---\n\n')
 
     // ------------------------------------------
-    // STEP 4 — SYSTEM PROMPT
+    // STEP 4 — ENHANCED SYSTEM PROMPT WITH CONTEXT AWARENESS
     // ------------------------------------------
-    const systemPrompt = `You are GRASP, an AI tutor for university-level courses.
+    
+    // Fetch course and topic names for better context
+    let courseName = null
+    let topicName = null
+    let questionPrompt = null
+    
+    if (courseId) {
+      const { data: course } = await supabase
+        .from('courses')
+        .select('name, code')
+        .eq('id', courseId)
+        .single()
+      if (course) {
+        courseName = `${course.code}: ${course.name}`
+      }
+    }
+    
+    if (topicId) {
+      const { data: topic } = await supabase
+        .from('topics')
+        .select('name')
+        .eq('id', topicId)
+        .single()
+      if (topic) {
+        topicName = topic.name
+      }
+    }
+    
+    if (questionId) {
+      const { data: question } = await supabase
+        .from('questions')
+        .select('prompt')
+        .eq('id', questionId)
+        .single()
+      if (question) {
+        questionPrompt = question.prompt
+      }
+    }
+    
+    // Build context-aware system prompt based on available information
+    let contextInfo = ''
+    if (courseName) {
+      contextInfo += `\nCURRENT COURSE: ${courseName}`
+    }
+    if (topicName) {
+      contextInfo += `\nCURRENT TOPIC: ${topicName}`
+    }
+    if (questionPrompt) {
+      contextInfo += `\nCURRENT QUESTION: ${questionPrompt.substring(0, 200)}${questionPrompt.length > 200 ? '...' : ''}`
+    }
+    
+    const systemPrompt = `You are GRASP, an advanced AI tutor specialized in university-level course instruction. Your role is to help students understand complex concepts through clear, structured explanations grounded in their course materials.
 
-RULES:
-1. Answer ONLY using the provided course materials.
-2. Cite sources using "[Source 1]" etc.
-3. If context is missing: say "Not covered in the provided materials."
-4. Keep answers concise and technically correct.
-5. NO hallucination.
+CORE PRINCIPLES:
+1. **Ground Truth First**: Answer ONLY using the provided course materials. Never invent information or make assumptions beyond what's explicitly stated.
+2. **Progressive Disclosure**: Start with the core concept, then build complexity. Use analogies and examples when helpful.
+3. **Active Learning**: Encourage understanding over memorization. Ask clarifying questions when appropriate.
+4. **Citation Integrity**: Always cite sources using "[Source 1]", "[Source 2]" format. Include page numbers and document titles.
+5. **Honest Limitations**: If information is missing or unclear, explicitly state: "This isn't fully covered in the provided materials. You may want to consult [specific source] or ask your instructor."
 
-CONTEXT:
+RESPONSE GUIDELINES:
+- **Structure**: Use clear headings, bullet points, and numbered lists for complex topics
+- **Depth**: Provide comprehensive explanations that build from fundamentals to advanced concepts
+- **Clarity**: Avoid jargon without explanation. Define technical terms on first use.
+- **Examples**: Include concrete examples, analogies, or visual descriptions when helpful
+- **Connections**: Link concepts to related topics when relevant
+- **Actionability**: When appropriate, suggest practice problems or study strategies
+
+CONTEXT AWARENESS:
+${contextInfo}
+
+COURSE MATERIALS PROVIDED:
 ${context}
-`
+
+IMPORTANT:
+- If the user's question requires information not in the provided materials, acknowledge this clearly
+- If multiple sources conflict, mention this and explain the differences
+- If a concept builds on prerequisite knowledge, briefly review those foundations
+- Maintain a supportive, encouraging tone while being academically rigorous
+- Adapt your explanation depth based on the complexity of the question
+
+Remember: Your goal is to help students achieve deep understanding, not just provide quick answers.`
 
     // ------------------------------------------
     // STEP 5 — LLM call

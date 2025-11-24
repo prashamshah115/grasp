@@ -4,6 +4,7 @@ import { Clock } from 'lucide-react'
 interface ExamTimerProps {
   durationMinutes: number
   startTime?: Date // Optional: if provided, calculates elapsed time
+  timeRemainingSec?: number // Optional: if provided, uses this directly (for resuming exams)
   onTimeUp: () => void
   isPaused?: boolean
 }
@@ -11,24 +12,38 @@ interface ExamTimerProps {
 export function ExamTimer({
   durationMinutes,
   startTime,
+  timeRemainingSec,
   onTimeUp,
   isPaused = false,
 }: ExamTimerProps) {
-  // Calculate initial seconds remaining based on startTime
+  // Calculate initial seconds remaining
   const calculateInitialSeconds = () => {
-    if (!startTime) {
-      return durationMinutes * 60
+    // If timeRemainingSec is provided (for resuming), use it directly
+    if (timeRemainingSec !== undefined) {
+      return Math.max(0, timeRemainingSec)
     }
 
-    const totalSeconds = durationMinutes * 60
-    const elapsedMs = Date.now() - new Date(startTime).getTime()
-    const elapsedSeconds = Math.floor(elapsedMs / 1000)
-    const remaining = totalSeconds - elapsedSeconds
+    // Otherwise calculate from startTime
+    if (startTime) {
+      const totalSeconds = durationMinutes * 60
+      const elapsedMs = Date.now() - new Date(startTime).getTime()
+      const elapsedSeconds = Math.floor(elapsedMs / 1000)
+      const remaining = totalSeconds - elapsedSeconds
+      return Math.max(0, remaining)
+    }
 
-    return Math.max(0, remaining)
+    // Default: full duration
+    return durationMinutes * 60
   }
 
   const [secondsRemaining, setSecondsRemaining] = useState(calculateInitialSeconds)
+  
+  // Update timer if timeRemainingSec changes (e.g., on resume)
+  useEffect(() => {
+    if (timeRemainingSec !== undefined) {
+      setSecondsRemaining(Math.max(0, timeRemainingSec))
+    }
+  }, [timeRemainingSec])
 
   useEffect(() => {
     if (isPaused || secondsRemaining <= 0) {

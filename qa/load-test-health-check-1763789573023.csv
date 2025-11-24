@@ -1,0 +1,21 @@
+Request,Latency (ms),Status,Memory Delta (bytes)
+1,437,error,374256
+2,472,error,600224
+3,486,error,743680
+4,476,error,528920
+5,504,error,761152
+6,427,error,3712
+7,437,error,77128
+8,377,error,551768
+9,388,error,687104
+10,343,error,276664
+11,418,error,800208
+12,417,error,718792
+13,416,error,719360
+14,416,error,1385272
+15,416,error,640232
+16,281,error,355008
+17,353,error,759536
+18,283,error,391944
+19,335,error,583480
+20,328,error,437136

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { AuthModal } from './AuthModal'
+import { EmailConfirmationScreen } from './EmailConfirmationScreen'
 import { supabase } from '@/lib/supabase'
 
 export interface AuthUser {
@@ -12,9 +13,12 @@ interface AuthContextValue {
   user: AuthUser | null
   isAuthenticated: boolean
   isLoading: boolean
+  pendingConfirmation: boolean
+  pendingEmail: string | null
   openAuthModal: (mode?: 'signin' | 'signup') => void
   closeAuthModal: () => void
   signOut: () => Promise<void>
+  resendConfirmation: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -30,6 +34,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<'signin' | 'signup'>('signin')
+  const [pendingConfirmation, setPendingConfirmation] = useState(false)
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null)
 
   const openAuthModal = useCallback((mode: 'signin' | 'signup' = 'signin') => {
     setModalMode(mode)
@@ -61,7 +67,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const { data } = await supabase.auth.getSession()
         if (!mounted) return
-        setUser(mapSupabaseUser(data.session?.user))
+        
+        const sessionUser = data.session?.user
+        const mappedUser = mapSupabaseUser(sessionUser)
+        setUser(mappedUser)
+        
+        // Check if user exists but no session (email confirmation pending)
+        if (sessionUser && !data.session) {
+          setPendingConfirmation(true)
+          setPendingEmail(sessionUser.email || null)
+        } else {
+          setPendingConfirmation(false)
+          setPendingEmail(null)
+        }
       } catch (error) {
         console.error('Failed to load session', error)
       } finally {
@@ -71,10 +89,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     loadSession()
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return
-      setUser(mapSupabaseUser(session?.user))
-      if (!session) setAuthError(null)
+      
+      const sessionUser = session?.user
+      const mappedUser = mapSupabaseUser(sessionUser)
+      setUser(mappedUser)
+      
+      // Handle email confirmation
+      if (event === 'SIGNED_UP' && sessionUser && !session) {
+        setPendingConfirmation(true)
+        setPendingEmail(sessionUser.email || null)
+      } else if (event === 'SIGNED_IN' && session) {
+        // Email confirmed, clear pending state
+        setPendingConfirmation(false)
+        setPendingEmail(null)
+      }
+      
+      if (!session) {
+        setAuthError(null)
+        setPendingConfirmation(false)
+        setPendingEmail(null)
+      }
     })
 
     return () => {
@@ -89,20 +125,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsSubmitting(true)
       try {
         if (mode === 'signup') {
-          const { error } = await supabase.auth.signUp({
+          const { data, error } = await supabase.auth.signUp({
             email,
             password,
             options: {
               data: { full_name: name },
-              emailRedirectTo: window.location.origin,
+              emailRedirectTo: `${window.location.origin}/auth/callback`,
             },
           })
           if (error) throw error
+          
+          // Check if email confirmation is required
+          if (data.user && !data.session) {
+            setPendingConfirmation(true)
+            setPendingEmail(email)
+            setModalOpen(false)
+          }
         } else {
           const { error } = await supabase.auth.signInWithPassword({ email, password })
           if (error) throw error
+          setModalOpen(false)
         }
-        setModalOpen(false)
       } catch (error) {
         console.error('Auth error', error)
         setAuthError(error instanceof Error ? error.message : 'Authentication failed')
@@ -113,17 +156,49 @@ export function AuthProvider({ children }: AuthProviderProps) {
     [],
   )
 
+  const resendConfirmation = useCallback(async () => {
+    if (!pendingEmail) return
+    
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: pendingEmail,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
+    })
+    
+    if (error) {
+      console.error('Failed to resend confirmation:', error)
+      throw error
+    }
+  }, [pendingEmail])
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
       isAuthenticated: !!user,
       isLoading,
+      pendingConfirmation,
+      pendingEmail,
       openAuthModal,
       closeAuthModal,
       signOut,
+      resendConfirmation,
     }),
-    [user, isLoading, openAuthModal, closeAuthModal, signOut],
+    [user, isLoading, pendingConfirmation, pendingEmail, openAuthModal, closeAuthModal, signOut, resendConfirmation],
   )
+
+  // Show email confirmation screen if pending
+  if (pendingConfirmation && pendingEmail) {
+    return (
+      <AuthContext.Provider value={value}>
+        <EmailConfirmationScreen
+          email={pendingEmail}
+          onResend={resendConfirmation}
+        />
+      </AuthContext.Provider>
+    )
+  }
 
   return (
     <AuthContext.Provider value={value}>

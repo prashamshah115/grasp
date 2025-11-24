@@ -45,6 +45,7 @@ import ExamResults from './components/ExamResults'
 
 // Auth & Error components (default exports)
 import ProtectedRoute from './components/auth/ProtectedRoute'
+import { AuthCallback } from './components/auth/AuthCallback'
 import ErrorBoundary from './components/ErrorBoundary'
 import NotFound from './components/NotFound'
 
@@ -62,6 +63,12 @@ const routes: RouteObject[] = [
       {
         index: true,
         element: <LandingPage />,
+      },
+
+      // Auth callback (email confirmation)
+      {
+        path: 'auth/callback',
+        element: <AuthCallback />,
       },
 
       // Course catalog

@@ -26,13 +26,20 @@ import { Send, BookOpen, Loader2, AlertCircle, ArrowLeft, ExternalLink } from 'l
 import { useAuth } from '@/components/auth/AuthProvider'
 import { useRAGChat } from '@/hooks/useRAGChat'
 import { fetchTopic, fetchCourse } from '@/lib/api'
+import { PDFViewerModal } from './shared/PDFViewer'
 import type { RAGChatResponse } from '@/types/api'
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  citations?: string[]
+  citations?: Array<{
+    documentTitle: string
+    pageNumber: number
+    similarity: number
+    docType: string
+    publicUrl?: string
+  }>
   pages?: Array<{
     id: string
     title: string
@@ -50,6 +57,11 @@ export default function ChatPanel() {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [selectedPdf, setSelectedPdf] = useState<{
+    url: string
+    title: string
+    page?: number
+  } | null>(null)
 
   // ==================== QUERIES ====================
 
@@ -112,7 +124,7 @@ export default function ChatPanel() {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
         content: response.answer,
-        citations: response.citations,
+        citations: response.citations, // Now includes full citation objects
         pages: response.pages,
         timestamp: new Date(),
       }
@@ -138,6 +150,20 @@ export default function ChatPanel() {
       e.preventDefault()
       handleSend()
     }
+  }
+
+  const handleOpenCitation = (citation: {
+    documentTitle: string
+    pageNumber: number
+    publicUrl?: string
+  }) => {
+    if (!citation.publicUrl) return
+
+    setSelectedPdf({
+      url: citation.publicUrl,
+      title: citation.documentTitle,
+      page: citation.pageNumber,
+    })
   }
 
   // ==================== LOADING STATE ====================
@@ -250,39 +276,41 @@ export default function ChatPanel() {
                     </div>
 
                     {/* Citations (for assistant messages) */}
-                    {message.role === 'assistant' && message.pages && message.pages.length > 0 && (
-                      <div className="mt-4 pt-4 border-t border-[#E5E7EB]">
-                        <div className="text-xs text-[#6B7280] mb-2 flex items-center gap-1">
-                          <ExternalLink className="w-3 h-3" />
-                          Sources
-                        </div>
-                        <div className="space-y-1">
-                          {message.pages.map((page, idx) => (
-                            <div
-                              key={page.id}
-                              className="text-sm text-[#4F46E5] hover:underline cursor-pointer"
-                            >
-                              {page.title} - Page {page.page}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Citations text (if available) */}
                     {message.role === 'assistant' &&
                       message.citations &&
                       message.citations.length > 0 && (
                         <div className="mt-4 pt-4 border-t border-[#E5E7EB]">
-                          <div className="text-xs text-[#6B7280] mb-2">Referenced Content:</div>
+                          <div className="text-xs text-[#6B7280] mb-2 flex items-center gap-1">
+                            <ExternalLink className="w-3 h-3" />
+                            Sources
+                          </div>
                           <div className="space-y-2">
                             {message.citations.map((citation, idx) => (
-                              <div
+                              <button
                                 key={idx}
-                                className="text-xs text-[#6B7280] bg-[#F9FAFB] rounded-[8px] p-3 border-l-2 border-[#4F46E5]"
+                                onClick={() => handleOpenCitation(citation)}
+                                disabled={!citation.publicUrl}
+                                className={`w-full text-left text-sm p-3 bg-[#F9FAFB] rounded-[8px] border-l-2 border-[#4F46E5] transition-all ${
+                                  citation.publicUrl
+                                    ? 'hover:bg-[#EEF2FF] cursor-pointer'
+                                    : 'cursor-default'
+                                }`}
                               >
-                                {citation}
-                              </div>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1">
+                                    <div className="text-[#4F46E5] font-medium mb-1">
+                                      {citation.documentTitle}
+                                    </div>
+                                    <div className="text-xs text-[#6B7280]">
+                                      Page {citation.pageNumber} • {citation.docType} • Match:{' '}
+                                      {(citation.similarity * 100).toFixed(0)}%
+                                    </div>
+                                  </div>
+                                  {citation.publicUrl && (
+                                    <ExternalLink className="w-4 h-4 text-[#4F46E5] flex-shrink-0" />
+                                  )}
+                                </div>
+                              </button>
                             ))}
                           </div>
                         </div>
@@ -366,6 +394,17 @@ export default function ChatPanel() {
           </p>
         </div>
       </div>
+
+      {/* PDF Viewer Modal */}
+      {selectedPdf && (
+        <PDFViewerModal
+          isOpen={!!selectedPdf}
+          url={selectedPdf.url}
+          documentTitle={selectedPdf.title}
+          initialPage={selectedPdf.page || 1}
+          onClose={() => setSelectedPdf(null)}
+        />
+      )}
     </div>
   )
 }

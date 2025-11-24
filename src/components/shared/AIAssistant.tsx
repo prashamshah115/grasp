@@ -1,38 +1,123 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Minimize2, Maximize2 } from 'lucide-react';
+import { Sparkles, X, Send, Minimize2, Maximize2, Loader2 } from 'lucide-react';
+import { useParams } from 'react-router-dom';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { useRAGChat } from '@/hooks/useRAGChat';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  citations?: string[];
+  pages?: Array<{ doc_title: string; page_number: number }>;
 }
 
 interface AIAssistantProps {
-  context?: string; // Current question or topic context
+  context?: string; // Current question or topic context (for display only)
+  topicId?: string; // Topic ID for RAG context
+  courseId?: string; // Course ID for RAG context
+  questionId?: string; // Question ID for RAG context (practice/exam questions)
+  mode?: 'practice' | 'exam' | 'compression' | 'general'; // Current app mode for context-aware prompts
   placeholder?: string;
 }
 
-export function AIAssistant({ context, placeholder = 'Ask me anything about this material...' }: AIAssistantProps) {
+export function AIAssistant({ 
+  context, 
+  topicId, 
+  courseId,
+  questionId,
+  mode = 'general',
+  placeholder 
+}: AIAssistantProps) {
+  const { courseId: urlCourseId } = useParams<{ courseId?: string }>();
+  const { user } = useAuth();
+  const chatMutation = useRAGChat();
+  
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
+  
+  // Context-aware initial greeting
+  const getInitialGreeting = () => {
+    switch (mode) {
+      case 'practice':
+        return '👋 Hi! I\'m here to help with your practice questions. I can explain concepts, break down problems step-by-step, or give you hints without spoiling the answer. What would you like help with?';
+      case 'exam':
+        return '👋 Exam mode! I can help clarify concepts and guide your thinking, but I\'ll let you work through the problems yourself. What would you like to understand better?';
+      case 'compression':
+        return '👋 Ready to help you understand the compression notes! I can explain concepts in detail, clarify confusing parts, or help you connect ideas. What would you like to explore?';
+      default:
+        return '👋 Hi! I\'m your AI study assistant. I can help explain concepts, break down problems, or guide you through solutions. What would you like to know?';
+    }
+  };
+  
+  // Context-aware placeholder
+  const getPlaceholder = () => {
+    if (placeholder) return placeholder;
+    switch (mode) {
+      case 'practice':
+        return 'Ask about this question or concept...';
+      case 'exam':
+        return 'Ask for clarification (I won\'t give answers)...';
+      case 'compression':
+        return 'Ask me to explain any concept in detail...';
+      default:
+        return 'Ask me anything about this material...';
+    }
+  };
+  
+  // Context-aware prompt suggestions
+  const getPromptSuggestions = () => {
+    const basePrompts = [
+      { text: 'Explain this step by step', icon: '💡' },
+      { text: 'What am I missing?', icon: '🤔' },
+      { text: 'Give me a hint', icon: '🎯' },
+    ];
+    
+    switch (mode) {
+      case 'practice':
+        return [
+          { text: 'Explain this concept from the ground up', icon: '📚' },
+          { text: 'Walk me through solving this step-by-step', icon: '🔍' },
+          { text: 'What\'s the key insight here?', icon: '💡' },
+          { text: 'Give me a hint without the answer', icon: '🎯' },
+        ];
+      case 'exam':
+        return [
+          { text: 'Clarify this concept', icon: '📖' },
+          { text: 'What should I remember here?', icon: '🧠' },
+          { text: 'Explain the underlying principle', icon: '🔬' },
+        ];
+      case 'compression':
+        return [
+          { text: 'Explain this concept in detail', icon: '📖' },
+          { text: 'How does this relate to other topics?', icon: '🔗' },
+          { text: 'Give me examples of this', icon: '💡' },
+          { text: 'What are common mistakes here?', icon: '⚠️' },
+        ];
+      default:
+        return basePrompts;
+    }
+  };
+  
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: '👋 Hi! I\'m your AI study assistant. I can help explain concepts, break down problems, or guide you through solutions. What would you like to know?',
+      content: getInitialGreeting(),
       timestamp: new Date()
     }
   ]);
   const [inputValue, setInputValue] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const promptSuggestions = getPromptSuggestions();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
+  const handleSend = async () => {
+    if (!inputValue.trim() || !user) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -41,39 +126,39 @@ export function AIAssistant({ context, placeholder = 'Ask me anything about this
       timestamp: new Date()
     };
 
-    setMessages([...messages, userMessage]);
+    setMessages(prev => [...prev, userMessage]);
+    const messageText = inputValue;
+    setInputValue('');
 
-    // Simulate AI response
-    setTimeout(() => {
+    // Call real RAG API with full context
+    try {
+      const response = await chatMutation.mutateAsync({
+        user_id: user.id,
+        topic_id: topicId || '',
+        course_id: courseId || urlCourseId || '',
+        question_id: questionId || '',
+        message: messageText,
+      });
+
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: generateAIResponse(inputValue, context),
+        content: response.answer,
+        citations: response.citations,
+        pages: response.pages,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiMessage]);
-    }, 800);
-
-    setInputValue('');
-  };
-
-  const generateAIResponse = (question: string, ctx?: string): string => {
-    // Mock AI responses - in production, this would call an actual AI API
-    const responses = [
-      'Great question! Let me break this down for you step by step...',
-      'Here\'s a helpful way to think about this concept...',
-      'This is a common area of confusion. The key insight is...',
-      'Let me explain this using a real-world analogy...',
-      'To solve this type of problem, try this approach...'
-    ];
-    
-    const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-    
-    if (ctx) {
-      return `${randomResponse}\n\nContext: ${ctx}\n\nBased on your question about "${question}", here's what you need to know:\n\n1. First, understand the core concept\n2. Then, apply it to the specific problem\n3. Finally, verify your solution makes sense\n\nWould you like me to elaborate on any of these steps?`;
+    } catch (error) {
+      console.error('RAG chat error:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'Sorry, I encountered an error processing your message. Please try again.',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
     }
-    
-    return `${randomResponse}\n\nRegarding "${question}":\n\nThis involves understanding the fundamental principles and applying them systematically. Let me know if you'd like more detail on any part!`;
   };
 
   if (!isOpen) {
@@ -158,6 +243,16 @@ export function AIAssistant({ context, placeholder = 'Ask me anything about this
               <div className="text-sm leading-relaxed whitespace-pre-wrap">
                 {message.content}
               </div>
+              {message.citations && message.citations.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-[#E5E7EB]">
+                  <div className="text-xs text-[#6B7280] font-medium mb-1">Sources:</div>
+                  <div className="text-xs text-[#9CA3AF] space-y-1">
+                    {message.citations.map((citation, idx) => (
+                      <div key={idx}>{citation}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className={`text-xs mt-2 ${
                 message.role === 'user' ? 'text-white/60' : 'text-[#9CA3AF]'
               }`}>
@@ -177,36 +272,31 @@ export function AIAssistant({ context, placeholder = 'Ask me anything about this
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            placeholder={placeholder}
+            placeholder={getPlaceholder()}
             className="flex-1 px-4 py-3 border border-[#E5E7EB] rounded-[12px] text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent"
           />
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() || chatMutation.isPending}
             className="w-12 h-12 bg-[#4F46E5] text-white rounded-[12px] flex items-center justify-center hover:bg-[#4338CA] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Send className="w-5 h-5" />
+            {chatMutation.isPending ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <Send className="w-5 h-5" />
+            )}
           </button>
         </div>
         <div className="mt-3 flex gap-2 flex-wrap">
-          <button
-            onClick={() => setInputValue('Explain this step by step')}
-            className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors"
-          >
-            💡 Explain step by step
-          </button>
-          <button
-            onClick={() => setInputValue('What am I missing?')}
-            className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors"
-          >
-            🤔 What am I missing?
-          </button>
-          <button
-            onClick={() => setInputValue('Give me a hint')}
-            className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors"
-          >
-            🎯 Give me a hint
-          </button>
+          {promptSuggestions.slice(0, 3).map((prompt, idx) => (
+            <button
+              key={idx}
+              onClick={() => setInputValue(prompt.text)}
+              className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors"
+            >
+              {prompt.icon} {prompt.text}
+            </button>
+          ))}
         </div>
       </div>
     </div>

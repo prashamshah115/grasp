@@ -41,10 +41,12 @@
             "input-otp": "^1.4.2",
             "lucide-react": "^0.487.0",
             "next-themes": "^0.4.6",
+            "pdfjs-dist": "^3.11.174",
             "react": "^18.3.1",
             "react-day-picker": "^8.10.1",
             "react-dom": "^18.3.1",
             "react-hook-form": "^7.55.0",
+            "react-pdf": "^10.2.0",
             "react-resizable-panels": "^2.1.7",
             "react-router-dom": "^7.9.6",
             "recharts": "^2.15.2",
@@ -55,14 +57,31 @@
             "zustand": "^5.0.8"
       },
       "devDependencies": {
+            "@playwright/test": "^1.48.0",
             "@trigger.dev/build": "^4.1.1",
             "@types/node": "^20.10.0",
             "@vitejs/plugin-react-swc": "^3.10.2",
+            "dotenv": "^17.2.3",
+            "tsx": "^4.20.6",
             "vite": "6.3.5"
       },
       "scripts": {
             "dev": "vite",
             "build": "vite build",
-            "health-check": "vite-node src/lib/health-check.ts"
+            "health-check": "vite-node src/lib/health-check.ts",
+            "test:e2e": "playwright test",
+            "test:e2e:ui": "playwright test --ui",
+            "test:e2e:headed": "playwright test --headed",
+            "test:e2e:debug": "playwright test --debug",
+            "test:setup": "playwright test tests/fixtures/auth.setup.ts",
+            "test:update-data": "tsx scripts/update-tests-for-real-data.ts",
+            "test:backend": "bash scripts/test-backend.sh",
+            "test:backend:unit": "deno test tests/backend/unit/ --allow-net --allow-env",
+            "test:backend:integration": "deno test tests/backend/integration/ --allow-net --allow-env",
+            "test:backend:database": "deno test tests/backend/database/ --allow-net --allow-env",
+            "test:backend:security": "deno test tests/backend/security/ --allow-net --allow-env",
+            "test:backend:performance": "deno test tests/backend/performance/ --allow-net --allow-env",
+            "test:backend:watch": "deno test --watch tests/backend/ --allow-net --allow-env",
+            "test:backend:coverage": "deno test --coverage tests/backend/ --allow-net --allow-env"
       }
 }

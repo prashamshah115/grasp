@@ -29,7 +29,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Flag, ChevronLeft, ChevronRight, Loader2, AlertCircle } from 'lucide-react'
+import { Flag, ChevronLeft, ChevronRight, Loader2, AlertCircle, BookOpen } from 'lucide-react'
 import { useAuth } from '@/components/auth/AuthProvider'
 import {
   fetchExamSessionWithQuestions,
@@ -41,6 +41,8 @@ import { QuestionCard } from '../shared/QuestionCard'
 import { ExamTimer } from './ExamTimer'
 import { QuestionNavigator } from './QuestionNavigator'
 import { SubmitExamModal } from './SubmitExamModal'
+import { PDFViewerModal } from '../shared/PDFViewer'
+import { supabase } from '@/lib/supabase'
 import type { CreateExamSessionResponse } from '@/types/api'
 
 export function ExamSimulation() {
@@ -57,6 +59,12 @@ export function ExamSimulation() {
   const [flagged, setFlagged] = useState<Set<string>>(new Set())
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showSourceMaterials, setShowSourceMaterials] = useState(false)
+  const [selectedPdf, setSelectedPdf] = useState<{
+    url: string
+    title: string
+    page?: number
+  } | null>(null)
 
   // ==================== QUERIES ====================
 
@@ -83,6 +91,23 @@ export function ExamSimulation() {
     queryKey: ['examAnswers', sessionId],
     queryFn: () => fetchExamAnswers(sessionId!),
     enabled: !!sessionId && !!session,
+  })
+
+  // Fetch source documents for current question's topic
+  const currentQuestion = session?.questions[currentQuestionIndex]
+  const { data: sourceDocuments } = useQuery({
+    queryKey: ['sourceDocuments', currentQuestion?.topic_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('topic_id', currentQuestion!.topic_id)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      return data
+    },
+    enabled: !!currentQuestion?.topic_id,
   })
 
   // Load saved answers into state
@@ -195,6 +220,22 @@ export function ExamSimulation() {
     }
   }
 
+  const handleOpenPdf = (documentId: string, title: string, page?: number) => {
+    const doc = sourceDocuments?.find(d => d.id === documentId)
+    if (!doc) return
+
+    const { data } = supabase.storage
+      .from('course-materials')
+      .getPublicUrl(doc.storage_path)
+
+    setSelectedPdf({
+      url: data.publicUrl,
+      title,
+      page,
+    })
+    setShowSourceMaterials(false)
+  }
+
   // ==================== LOADING & ERROR STATES ====================
 
   if (sessionLoading && !sessionFromState) {
@@ -236,7 +277,6 @@ export function ExamSimulation() {
 
   // ==================== RENDER ====================
 
-  const currentQuestion = session.questions[currentQuestionIndex]
   const answeredCount = Object.keys(answers).length
 
   const questionsWithStatus = session.questions.map((q, index) => ({
@@ -271,6 +311,7 @@ export function ExamSimulation() {
               <ExamTimer
                 durationMinutes={session.exam.duration_minutes}
                 startTime={new Date(session.started_at)}
+                timeRemainingSec={session.time_remaining_sec}
                 onTimeUp={handleTimeUp}
               />
               <button
@@ -311,8 +352,19 @@ export function ExamSimulation() {
 
             {/* Source Reference (if available) */}
             {currentQuestion.source_ref && (
-              <div className="text-sm text-[#6B7280] mb-6 pb-4 border-b border-[#E5E7EB]">
-                📚 Source: {currentQuestion.source_ref}
+              <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#E5E7EB]">
+                <div className="text-sm text-[#6B7280]">
+                  📚 Source: {currentQuestion.source_ref}
+                </div>
+                {sourceDocuments && sourceDocuments.length > 0 && (
+                  <button
+                    onClick={() => setShowSourceMaterials(true)}
+                    className="flex items-center gap-2 text-sm text-[#4F46E5] hover:text-[#4338CA] transition-colors"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    View Materials
+                  </button>
+                )}
               </div>
             )}
 
@@ -414,6 +466,57 @@ export function ExamSimulation() {
         answeredQuestions={answeredCount}
         flaggedQuestions={flagged.size}
       />
+
+      {/* Source Materials Modal */}
+      {showSourceMaterials && sourceDocuments && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowSourceMaterials(false)}
+          />
+          <div className="relative bg-white rounded-[16px] p-8 max-w-2xl w-full mx-4 shadow-2xl">
+            <h3 className="text-xl font-semibold mb-6">Source Materials</h3>
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {sourceDocuments.map((doc) => (
+                <button
+                  key={doc.id}
+                  onClick={() => handleOpenPdf(doc.id, doc.title)}
+                  className="w-full flex items-center gap-4 p-4 border border-[#E5E7EB] rounded-[12px] hover:border-[#4F46E5] hover:bg-[#F9FAFB] transition-all text-left"
+                >
+                  <div className="flex-shrink-0 w-12 h-12 rounded-[10px] bg-[#FEE2E2] flex items-center justify-center">
+                    <BookOpen className="w-6 h-6 text-[#EF4444]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-[#111827] truncate mb-1">
+                      {doc.title}
+                    </div>
+                    <div className="text-sm text-[#6B7280]">
+                      {doc.doc_type} • {doc.total_pages || '?'} pages
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowSourceMaterials(false)}
+              className="mt-6 w-full px-4 py-3 bg-[#F3F4F6] text-[#111827] rounded-[12px] hover:bg-[#E5E7EB] transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Viewer Modal */}
+      {selectedPdf && (
+        <PDFViewerModal
+          isOpen={!!selectedPdf}
+          url={selectedPdf.url}
+          documentTitle={selectedPdf.title}
+          initialPage={selectedPdf.page || 1}
+          onClose={() => setSelectedPdf(null)}
+        />
+      )}
     </div>
   )
 }

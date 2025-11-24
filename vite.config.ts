@@ -5,6 +5,19 @@
 
   export default defineConfig({
     plugins: [react()],
+    optimizeDeps: {
+      exclude: ['react-pdf'],
+      include: ['warning'],
+      esbuildOptions: {
+        mainFields: ['module', 'main'],
+      },
+    },
+    build: {
+      commonjsOptions: {
+        include: [/warning/, /node_modules/],
+        transformMixedEsModules: true,
+      },
+    },
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {

@@ -186,7 +186,11 @@ export function PracticeView() {
       </div>
       
       {/* AI Assistant */}
-      <AIAssistant context={`Course: ${course.code} - Practice Mode`} />
+      <AIAssistant 
+        context={`Course: ${course.code} - Practice Mode`}
+        courseId={courseId!}
+        mode="practice"
+      />
     </div>
   );
 }

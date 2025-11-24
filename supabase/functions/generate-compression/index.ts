@@ -1,5 +1,4 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '../_shared/rate-limit.ts'
 import {
   handleError,
@@ -38,8 +37,11 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
       ],
-      temperature: 0.3,
-      max_tokens: 1500
+      temperature: 0.5, // Balanced creativity for comprehensive explanations
+      max_tokens: 3000, // Increased for comprehensive, detailed notes
+      top_p: 0.9, // Nucleus sampling for better quality
+      frequency_penalty: 0.2, // Reduce repetition in longer outputs
+      presence_penalty: 0.1 // Encourage diverse topic coverage
     })
   })
 
@@ -61,13 +63,9 @@ serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get('PUBLIC_SUPABASE_URL')!,
-      Deno.env.get('SERVICE_ROLE_KEY')!
-    )
-
-    // Authenticate user (uses centralized error handling with CORS)
-    const { user } = await requireAuth(req, supabase)
+    // Authenticate user and get properly configured Supabase client
+    // This uses the CORRECT Supabase v2 pattern for Edge Functions
+    const { supabase, user } = await requireAuth(req)
     console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
 
     // Rate limiting check
@@ -99,31 +97,84 @@ serve(async (req) => {
     const { topicId } = body
     console.log(`[${FUNCTION_NAME}] Request:`, { userId: user.id, topicId })
 
-    // STEP 1: Grab all document pages for this topic (admin + user docs)
-    const { data: pages, error: pagesError } = await supabase
+    // STEP 1: Get course_id from topic
+    const { data: topic, error: topicError } = await supabase
+      .from('topics')
+      .select('course_id')
+      .eq('id', topicId)
+      .single()
+
+    if (topicError || !topic) {
+      throw new NotFoundError('Topic not found')
+    }
+
+    const courseId = topic.course_id
+    console.log(`[${FUNCTION_NAME}] Found course_id: ${courseId} for topic ${topicId}`)
+
+    // STEP 2: Grab all document pages for this topic OR course (handles NULL topic_id)
+    // First try topic-specific documents, then fall back to course documents
+    let { data: pages, error: pagesError } = await supabase
       .from('document_pages')
       .select(`
-        content,
+        text_content,
         page_number,
         documents!inner(
           id,
           title,
           topic_id,
+          course_id,
           owner_user_id
         )
       `)
+      .eq('documents.course_id', courseId)
       .eq('documents.topic_id', topicId)
       .or(`owner_user_id.is.null,owner_user_id.eq.${user.id}`, { foreignTable: 'documents' })
       .order('documents.id', { ascending: true })
       .order('page_number', { ascending: true })
       .limit(50)
 
-    if (pagesError) throw pagesError
+    // If no topic-specific documents, fall back to course documents (topic_id IS NULL)
     if (!pages || pages.length === 0) {
-      throw new NotFoundError('No documents found for this topic. Upload course materials first.')
+      console.log(`[${FUNCTION_NAME}] No topic-specific documents, searching course documents...`)
+      const { data: coursePages, error: coursePagesError } = await supabase
+        .from('document_pages')
+        .select(`
+          text_content,
+          page_number,
+          documents!inner(
+            id,
+            title,
+            topic_id,
+            course_id,
+            owner_user_id
+          )
+        `)
+        .eq('documents.course_id', courseId)
+        .is('documents.topic_id', null)
+        .or(`owner_user_id.is.null,owner_user_id.eq.${user.id}`, { foreignTable: 'documents' })
+        .order('documents.id', { ascending: true })
+        .order('page_number', { ascending: true })
+        .limit(50)
+
+      if (coursePagesError) {
+        console.error(`[${FUNCTION_NAME}] Error fetching course pages:`, coursePagesError)
+        pagesError = coursePagesError
+      } else {
+        pages = coursePages
+        console.log(`[${FUNCTION_NAME}] Found ${pages?.length || 0} course documents (topic_id: NULL)`)
+      }
     }
 
-    console.log('[generate-compression] Found', pages.length, 'pages')
+    if (pagesError) {
+      console.error(`[${FUNCTION_NAME}] Pages error:`, pagesError)
+      throw pagesError
+    }
+    
+    if (!pages || pages.length === 0) {
+      throw new NotFoundError('No documents found for this topic or course. Upload course materials first.')
+    }
+
+    console.log(`[${FUNCTION_NAME}] Found ${pages.length} pages`)
 
     // STEP 2: Fetch questions for context
     const { data: questions } = await supabase
@@ -136,40 +187,138 @@ serve(async (req) => {
       questions?.map((q: any) => `- ${q.prompt}`).join('\n') ||
       'No questions available.'
 
-    console.log('[generate-compression] Questions:', questions?.length ?? 0)
+    console.log(`[${FUNCTION_NAME}] Questions: ${questions?.length ?? 0}`)
 
     // STEP 3: Aggregate & truncate content
-    const content = pages
-      .map((p: any) => {
-        const pageContent = p.content || ''
-        return `[${p.documents.title}, p.${p.page_number}]\n${pageContent.substring(0, 2000)}`
-      })
-      .join('\n\n---\n\n')
+    // Handle both text_content and content fields (different ingestion paths use different fields)
+    const contentParts: string[] = []
+    
+    try {
+      for (const p of pages) {
+        try {
+          // Safely access nested document fields - handle both array and object formats
+          let docTitle = 'Unknown Document'
+          if (p.documents) {
+            if (Array.isArray(p.documents)) {
+              docTitle = p.documents[0]?.title || 'Unknown Document'
+            } else {
+              docTitle = p.documents.title || 'Unknown Document'
+            }
+          }
+          
+          const pageNum = p.page_number || 0
+          
+          // Try text_content first (newer ingestion), fall back to content (older ingestion)
+          const pageContent = p.text_content || p.content || ''
+          
+          if (!pageContent || pageContent.trim().length === 0) {
+            console.warn(`[${FUNCTION_NAME}] Page ${pageNum} of ${docTitle} has no content`)
+            continue // Skip empty pages
+          }
+          
+          // Only include pages with actual content
+          const contentChunk = `[${docTitle}, p.${pageNum}]\n${pageContent.substring(0, 2000)}`
+          if (contentChunk.length > 0) {
+            contentParts.push(contentChunk)
+          }
+        } catch (pageError) {
+          console.error(`[${FUNCTION_NAME}] Error processing page:`, pageError)
+          // Continue with other pages
+        }
+      }
+    } catch (aggregateError) {
+      console.error(`[${FUNCTION_NAME}] Error aggregating content:`, aggregateError)
+      throw new Error(`Failed to aggregate content: ${aggregateError instanceof Error ? aggregateError.message : 'Unknown error'}`)
+    }
+    
+    const content = contentParts.join('\n\n---\n\n')
+    
+    if (!content || content.trim().length === 0) {
+      throw new NotFoundError('No content found in document pages. Documents may not be fully processed or pages are empty.')
+    }
+    
+    console.log(`[${FUNCTION_NAME}] Aggregated ${content.length} chars from ${contentParts.length} pages (out of ${pages.length} total)`)
 
-    // STEP 4: Build LLM system prompt
-    const systemPrompt = `
-You are creating ultra-dense, exam-optimized compression notes.
+    // STEP 4: Build enhanced LLM system prompt for high-quality compression
+    const systemPrompt = `You are an expert educational content creator specializing in creating comprehensive, exam-optimized study notes for university-level courses. Your task is to transform dense course materials into clear, structured, and actionable compression notes.
 
-TOPIC QUESTIONS:
+QUALITY STANDARDS:
+1. **Comprehensiveness**: Cover all critical concepts, not just surface-level facts
+2. **Clarity**: Explain concepts from the ground up - assume the reader is learning, not reviewing
+3. **Structure**: Organize information logically with clear hierarchies
+4. **Actionability**: Include practical applications, examples, and common pitfalls
+5. **Exam Focus**: Prioritize information likely to appear on exams while maintaining educational value
+
+CONTENT REQUIREMENTS:
+- **Foundational Concepts**: Start with core definitions and principles before advanced topics
+- **Step-by-Step Explanations**: Break down complex processes into clear steps
+- **Visual Descriptions**: Describe diagrams, algorithms, or processes in text format
+- **Connections**: Show relationships between concepts
+- **Common Mistakes**: Highlight frequent errors or misconceptions
+- **Memory Aids**: Include mnemonics or patterns when helpful
+
+TOPIC QUESTIONS (for context on what students need to know):
 ${questionList}
 
 SOURCE MATERIAL:
 ${content}
 
 TASK:
-Generate 10–20 bullet points with:
-- Key formulas
-- Core definitions
-- Algorithms
-- Pitfalls
-- Exam-critical facts
+Generate comprehensive compression notes (15-25 bullet points) that include:
 
-FORMAT:
-- Markdown bullets
-- No intro/outro
-- Bold key terms
-- Use code blocks for formulas
-`
+1. **Core Definitions** (3-5 points)
+   - Essential terminology with clear explanations
+   - Fundamental concepts explained from first principles
+
+2. **Key Concepts & Principles** (5-8 points)
+   - Important theories, frameworks, or models
+   - How concepts relate to each other
+   - Underlying principles that govern the topic
+
+3. **Processes & Algorithms** (3-5 points)
+   - Step-by-step procedures
+   - Algorithm descriptions with clear logic flow
+   - Decision trees or flowcharts described in text
+
+4. **Formulas & Equations** (2-4 points)
+   - Key formulas with variable explanations
+   - When and how to apply each formula
+   - Formula derivations or intuitions when helpful
+
+5. **Practical Applications** (2-3 points)
+   - Real-world examples
+   - Use cases and scenarios
+   - Problem-solving strategies
+
+6. **Common Pitfalls & Edge Cases** (2-3 points)
+   - Frequent mistakes students make
+   - Exceptions to general rules
+   - Tricky edge cases to watch for
+
+7. **Exam-Critical Facts** (2-3 points)
+   - High-probability exam topics
+   - Quick reference facts
+   - Comparison tables or distinctions
+
+FORMATTING GUIDELINES:
+- Use Markdown formatting with clear hierarchy
+- Use **bold** for key terms and important concepts
+- Use code blocks for formulas, code snippets, or technical notation
+- Use numbered lists for sequential processes
+- Use bullet points for parallel concepts
+- Include section headers (##) to organize content
+- No introductory or concluding paragraphs - dive straight into content
+- Each bullet should be self-contained but build on previous points
+
+QUALITY CHECK:
+Before finalizing, ensure:
+✓ All major concepts from source materials are covered
+✓ Explanations are clear enough for someone learning the topic
+✓ Information is accurate and grounded in source materials
+✓ Formatting enhances readability
+✓ Content is exam-relevant without sacrificing educational depth
+
+Generate the compression notes now:`
 
     // STEP 5: Generate via LLM
     console.log('[generate-compression] Calling LLM…')
