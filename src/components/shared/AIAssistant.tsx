@@ -39,6 +39,7 @@ export function AIAssistant({
   } = useChat({
     topicId: topicId || undefined,
     courseId: courseId || urlCourseId || undefined,
+    questionId: questionId || undefined,
     compressionNotes: compressionNotes || undefined,
   });
   
@@ -49,15 +50,20 @@ export function AIAssistant({
 
   // Context-aware initial greeting
   const getInitialGreeting = () => {
+    const hasQuestionContext = questionId && context
+    const questionContextNote = hasQuestionContext 
+      ? ' I can see the current question you\'re working on.'
+      : ''
+    
     switch (mode) {
       case 'practice':
-        return '👋 Hi! I\'m here to help with your practice questions. I can explain concepts, break down problems step-by-step, or give you hints without spoiling the answer. What would you like help with?';
+        return `👋 Hi! I'm here to help with your practice questions.${questionContextNote} I can explain concepts, break down problems step-by-step, or give you hints without spoiling the answer. What would you like help with?`;
       case 'exam':
-        return '👋 Exam mode! I can help clarify concepts and guide your thinking, but I\'ll let you work through the problems yourself. What would you like to understand better?';
+        return `👋 Exam mode!${questionContextNote} I can help clarify concepts and guide your thinking, but I'll let you work through the problems yourself. What would you like to understand better?`;
       case 'compression':
         return '👋 Ready to help you understand the compression notes! I can explain concepts in detail, clarify confusing parts, or help you connect ideas. What would you like to explore?';
       default:
-        return '👋 Hi! I\'m your AI study assistant. I can help explain concepts, break down problems, or guide you through solutions. What would you like to know?';
+        return `👋 Hi! I'm your AI study assistant.${questionContextNote} I can help explain concepts, break down problems, or guide you through solutions. What would you like to know?`;
     }
   };
   

@@ -12,7 +12,7 @@
  * - NO mock data, NO props
  */
 
-import { Trophy, Clock, FileCheck, AlertCircle, CheckCircle } from 'lucide-react'
+import { Trophy, Clock, FileCheck, AlertCircle, CheckCircle, Loader2 } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCourse } from '@/hooks'
 import { useAuth } from '@/components/auth/AuthProvider'
@@ -21,11 +21,16 @@ import { AIAssistant } from '../shared/AIAssistant'
 import { useQuery } from '@tanstack/react-query'
 import { fetchExams, fetchUserExamSessions, getActiveExamSessions } from '@/lib/api'
 import { queryKeys } from '@/lib/queryClient'
+import { useCreateExamSession } from '@/hooks/useSessions'
+import { useState, useEffect } from 'react'
+import type { CreateExamSessionResponse } from '@/types/api'
 
 export function ExamView() {
   const { courseId } = useParams<{ courseId: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const createSessionMutation = useCreateExamSession()
+  const [startingExamId, setStartingExamId] = useState<string | null>(null)
 
   // Fetch course data
   const { data: course, isLoading: courseLoading } = useCourse(courseId!)
@@ -45,11 +50,20 @@ export function ExamView() {
   })
 
   // Fetch active exam sessions for resumption
-  const { data: activeSessions, isLoading: activeSessionsLoading } = useQuery({
+  const { data: activeSessions, isLoading: activeSessionsLoading, error: activeSessionsError } = useQuery({
     queryKey: ['activeExamSessions', courseId, user?.id],
     queryFn: () => getActiveExamSessions(courseId!),
     enabled: !!courseId && !!user,
+    retry: 2,
+    staleTime: 0, // Always fetch fresh data
   })
+
+  // Log errors for debugging
+  useEffect(() => {
+    if (activeSessionsError) {
+      console.error('[ExamView] Error fetching active sessions:', activeSessionsError)
+    }
+  }, [activeSessionsError])
 
   // Filter sessions for exams in this course
   const pastSessions = allSessions?.filter((session: any) =>
@@ -60,6 +74,21 @@ export function ExamView() {
   const activeSessionMap = new Map(
     activeSessions?.map((session: any) => [session.exam_id, session]) || []
   )
+
+  // Debug logging
+  useEffect(() => {
+    console.log('[ExamView] Active sessions:', activeSessions)
+    console.log('[ExamView] Active session map:', Array.from(activeSessionMap.entries()))
+    console.log('[ExamView] Exams:', exams?.map(e => ({ id: e.id, name: e.name })))
+    if (activeSessions && activeSessions.length > 0) {
+      console.log('[ExamView] Found', activeSessions.length, 'active sessions')
+      activeSessions.forEach((session: any) => {
+        console.log('[ExamView] Session:', session.id, 'for exam:', session.exam_id, 'exam data:', session.exams)
+      })
+    } else {
+      console.log('[ExamView] No active sessions found')
+    }
+  }, [activeSessions, activeSessionMap, exams])
 
   const isLoading = courseLoading || examsLoading || activeSessionsLoading
 
@@ -75,9 +104,51 @@ export function ExamView() {
     )
   }
 
-  const handleStartExam = (examId: string) => {
-    // Navigate to exam definition page
-    navigate(`/exam/${examId}`)
+  const handleStartExam = async (examId: string) => {
+    setStartingExamId(examId)
+    try {
+      const result = await createSessionMutation.mutateAsync({
+        exam_id: examId,
+      })
+      
+      // Navigate directly to exam session with data in state
+      navigate(`/exam-session/${result.session_id}`, {
+        state: {
+          sessionData: result,
+        },
+      })
+    } catch (err: any) {
+      console.error('Failed to start exam:', err)
+      // NEVER navigate to ExamDefinition page - always try to resume or stay on exam view
+      const status = err.context?.status || err.status
+      
+      if (status === 409) {
+        // 409 means active session exists - find it and resume
+        const activeSession = activeSessions?.find((s: any) => s.exam_id === examId)
+        if (activeSession) {
+          navigate(`/exam-session/${activeSession.id}`)
+          return
+        }
+        
+        // If not found in cache, refetch active sessions
+        try {
+          const refreshedSessions = await getActiveExamSessions(courseId!)
+          const refreshedActiveSession = refreshedSessions?.find((s: any) => s.exam_id === examId)
+          if (refreshedActiveSession) {
+            navigate(`/exam-session/${refreshedActiveSession.id}`)
+            return
+          }
+        } catch (refetchError) {
+          console.error('Failed to refetch active sessions:', refetchError)
+        }
+      }
+      
+      // If we can't resume, stay on exam view page (don't navigate anywhere)
+      // User can try again or use Resume button if it appears
+      console.error('Could not start or resume exam session')
+    } finally {
+      setStartingExamId(null)
+    }
   }
 
   const handleResumeExam = (sessionId: string) => {
@@ -129,10 +200,15 @@ export function ExamView() {
 
                   {(() => {
                     const activeSession = activeSessionMap.get(exam.id)
-                    if (activeSession) {
+                    console.log('[ExamView] Render - Exam:', exam.id, 'Active session:', activeSession)
+                    
+                    if (activeSession && activeSession.id) {
                       return (
                         <button
-                          onClick={() => handleResumeExam(activeSession.id)}
+                          onClick={() => {
+                            console.log('[ExamView] Resume button clicked for session:', activeSession.id)
+                            handleResumeExam(activeSession.id)
+                          }}
                           className="bg-[#10B981] text-white px-8 py-4 rounded-[12px] font-medium hover:bg-[#059669] transition-all shadow-lg flex items-center gap-2"
                         >
                           <Clock className="w-4 h-4" />
@@ -143,9 +219,17 @@ export function ExamView() {
                     return (
                       <button
                         onClick={() => handleStartExam(exam.id)}
-                        className="bg-white text-[#F59E0B] px-8 py-4 rounded-[12px] font-medium hover:bg-[#F9FAFB] transition-all shadow-lg"
+                        disabled={startingExamId === exam.id || createSessionMutation.isLoading}
+                        className="bg-white text-[#F59E0B] px-8 py-4 rounded-[12px] font-medium hover:bg-[#F9FAFB] transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                       >
-                        Start Exam
+                        {startingExamId === exam.id && createSessionMutation.isLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Starting...
+                          </>
+                        ) : (
+                          'Start Exam'
+                        )}
                       </button>
                     )
                   })()}

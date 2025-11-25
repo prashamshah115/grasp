@@ -9,13 +9,18 @@
 
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { fetchExam } from '../lib/api'
+import { useEffect } from 'react'
+import { fetchExam, getActiveExamSessions } from '../lib/api'
 import { queryKeys } from '../lib/queryClient'
+import { useCreateExamSession } from '../hooks/useSessions'
+import { useAuth } from './auth/AuthProvider'
 import LoadingScreen from './LoadingScreen'
 
 export default function ExamDefinition() {
   const { examId } = useParams<{ examId: string }>()
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const createSessionMutation = useCreateExamSession()
 
   const { data: exam, isLoading } = useQuery({
     queryKey: queryKeys.exams.detail(examId!),
@@ -23,7 +28,47 @@ export default function ExamDefinition() {
     enabled: !!examId,
   })
 
-  if (isLoading) return <LoadingScreen message="Loading exam..." />
+  // Check for active sessions
+  const { data: activeSessions } = useQuery({
+    queryKey: ['activeExamSessions', exam?.course_id, user?.id],
+    queryFn: () => getActiveExamSessions(exam!.course_id),
+    enabled: !!exam && !!user,
+  })
+
+  // Auto-start exam session on mount - never show this screen
+  useEffect(() => {
+    if (!exam || !user) return
+
+    const startExam = async () => {
+      // Check for active session first
+      const activeSession = activeSessions?.find((s: any) => s.exam_id === examId)
+      if (activeSession) {
+        navigate(`/exam-session/${activeSession.id}`, { replace: true })
+        return
+      }
+
+      // Create new session
+      try {
+        const result = await createSessionMutation.mutateAsync({
+          exam_id: examId!,
+        })
+        navigate(`/exam-session/${result.session_id}`, {
+          replace: true,
+          state: {
+            sessionData: result,
+          },
+        })
+      } catch (err: any) {
+        console.error('Failed to start exam:', err)
+        // If error, redirect back to exam view
+        navigate(`/course/${exam.course_id}/exam`, { replace: true })
+      }
+    }
+
+    startExam()
+  }, [exam, user, activeSessions, examId, navigate, createSessionMutation])
+
+  if (isLoading) return <LoadingScreen message="Starting exam..." />
 
   if (!exam) {
     return (
@@ -41,49 +86,6 @@ export default function ExamDefinition() {
     )
   }
 
-  const handleStartExam = () => {
-    // Navigate to start route (loader will create session)
-    navigate(`/exam/${examId}/start`)
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="max-w-2xl w-full bg-white rounded-lg shadow-lg p-8">
-        <h1 className="text-3xl font-bold mb-4 text-gray-900">{exam.name}</h1>
-
-        <div className="mb-6 space-y-2">
-          <p className="text-gray-600">
-            <strong>Duration:</strong> {exam.duration_min} minutes
-          </p>
-          <p className="text-gray-600">
-            <strong>Questions:</strong> {exam.num_questions || 'TBD'}
-          </p>
-        </div>
-
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-2 text-gray-900">Instructions</h2>
-          <p className="text-gray-700">
-            This exam will test your knowledge on the course material.
-            You will have {exam.duration_min} minutes to complete all questions.
-            Once you start, the timer cannot be paused.
-          </p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-4 pt-4 border-t border-gray-200">
-          <button
-            onClick={() => navigate(-1)}
-            className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 font-medium transition-all"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleStartExam}
-            className="flex-1 px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 font-semibold text-lg shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
-          >
-            🚀 Start Exam
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+  // Show loading while starting exam (should auto-redirect before this shows)
+  return <LoadingScreen message="Starting exam session..." />
 }

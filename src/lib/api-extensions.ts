@@ -139,45 +139,112 @@ export async function fetchSessionDetails(sessionId: string) {
   }
 }
 
-// ==================== EXAM ANSWERS ====================
+// ==================== EXAM ANSWERS (Event Log Pattern) ====================
 
 /**
- * ✅ NEW: Submit individual exam answer during exam
+ * ✅ NEW: Write exam event (Event Log + Snapshot Pattern)
+ * This is the core function that implements the event sourcing pattern.
+ * Writes event to append-only log, snapshot is updated via database trigger.
  */
-export async function submitExamAnswer(sessionId: string, questionId: string, answer: string) {
+export async function writeExamEvent(
+  sessionId: string,
+  eventType: 'answer' | 'flag' | 'navigate' | 'time_update' | 'start' | 'submit',
+  payload: Record<string, any>
+) {
   const user = await requireAuth()
 
+  console.log('[writeExamEvent] Writing event:', { sessionId, eventType, payload })
+
+  // Verify session belongs to user
+  const { data: session, error: sessionError } = await supabase
+    .from('exam_sessions')
+    .select('id, user_id')
+    .eq('id', sessionId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (sessionError || !session) {
+    console.error('[writeExamEvent] Session verification failed:', sessionError)
+    throw new Error('Exam session not found or access denied')
+  }
+
+  // Insert event into append-only log
+  // Snapshot will be updated automatically via database trigger
   const { data, error } = await supabase
-    .from('exam_answers')
-    .upsert(
-      {
-        session_id: sessionId,
-        user_id: user.id,
-        question_id: questionId,
-        user_answer: answer,
-      },
-      {
-        onConflict: 'session_id,question_id',
-      }
-    )
+    .from('events_exam_progress')
+    .insert({
+      session_id: sessionId,
+      user_id: user.id,
+      event_type: eventType,
+      payload: payload,
+    })
     .select()
     .single()
 
-  if (error) handleSupabaseError(error)
+  if (error) {
+    console.error('[writeExamEvent] Database error:', error)
+    handleSupabaseError(error)
+  } else {
+    console.log('[writeExamEvent] Event written successfully:', data)
+  }
   return data
 }
 
 /**
+ * ✅ NEW: Submit individual exam answer during exam (uses event log)
+ * Legacy function maintained for backward compatibility
+ */
+export async function submitExamAnswer(
+  sessionId: string, 
+  questionId: string, 
+  answer: string,
+  isFlagged?: boolean
+) {
+  return writeExamEvent(sessionId, 'answer', {
+    questionId,
+    answer,
+    isFlagged: isFlagged ?? false,
+  })
+}
+
+/**
+ * ✅ NEW: Update flag status for an exam answer (uses event log)
+ * Legacy function maintained for backward compatibility
+ */
+export async function updateExamAnswerFlag(
+  sessionId: string,
+  questionId: string,
+  isFlagged: boolean
+) {
+  return writeExamEvent(sessionId, 'flag', {
+    questionId,
+    isFlagged,
+  })
+}
+
+/**
  * ✅ NEW: Fetch exam answers for a session
+ * Note: RLS policy ensures user can only see answers for their own sessions
  */
 export async function fetchExamAnswers(sessionId: string) {
   const user = await requireAuth()
+
+  // Verify session belongs to user (RLS will enforce this)
+  const { data: session, error: sessionError } = await supabase
+    .from('exam_sessions')
+    .select('id')
+    .eq('id', sessionId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (sessionError || !session) {
+    throw new Error('Exam session not found or access denied')
+  }
 
   const { data, error } = await supabase
     .from('exam_answers')
     .select('*')
     .eq('session_id', sessionId)
-    .eq('user_id', user.id)
 
   if (error) handleSupabaseError(error)
   return data || []

@@ -145,6 +145,7 @@ export interface CreateExamSessionResponse {
     exam_type: string
     duration_minutes: number
     total_questions: number
+    course_id: string
     course_code: string
     course_name: string
   }

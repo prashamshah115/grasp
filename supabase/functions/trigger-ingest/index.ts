@@ -93,6 +93,21 @@ serve(async (req) => {
       status: document.status
     })
 
+    // Determine storage bucket (default to user-content for user uploads)
+    const bucketName = document.storage_bucket || 'user-content'
+    
+    // Get signed URL for the PDF file
+    const { data: signedUrlData, error: urlError } = await supabase.storage
+      .from(bucketName)
+      .createSignedUrl(document.storage_path, 3600) // 1 hour
+
+    if (urlError || !signedUrlData) {
+      console.error(`[${FUNCTION_NAME}] Failed to get signed URL:`, urlError)
+      throw new Error(`Failed to get signed URL: ${urlError?.message || 'Unknown error'}`)
+    }
+
+    console.log(`[${FUNCTION_NAME}] Got signed URL, updating document status...`)
+
     // Update status to queued
     await supabase
       .from('documents')
@@ -108,11 +123,13 @@ serve(async (req) => {
         'Authorization': `Bearer ${triggerKey}`
       },
       body: JSON.stringify({
-        documentId: document.id,
-        storageBucket: document.storage_bucket,
-        storagePath: document.storage_path,
-        courseId: document.course_id,
-        topicId: document.topic_id
+        payload: {
+          documentId: document.id,
+          pdfUrl: signedUrlData.signedUrl,
+          courseId: document.course_id || '',
+          topicId: document.topic_id || null,
+          userId: user.id
+        }
       })
     })
 

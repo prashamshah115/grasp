@@ -46,6 +46,7 @@ interface StartExamSessionResponse {
     exam_type: string
     duration_minutes: number
     total_questions: number
+    course_id: string
     course_code: string
     course_name: string
   }
@@ -261,6 +262,26 @@ serve(async (req) => {
       session = newSession
       startedAt = new Date(newSession.started_at)
       console.log(`[${FUNCTION_NAME}] Session created:`, session.id)
+      
+      // Write 'start' event to event log
+      const { error: eventError } = await supabase
+        .from('events_exam_progress')
+        .insert({
+          session_id: session.id,
+          user_id: user.id,
+          event_type: 'start',
+          payload: {
+            examId: exam_id,
+            startedAt: startedAt.toISOString(),
+          },
+        })
+      
+      if (eventError) {
+        console.error(`[${FUNCTION_NAME}] Failed to write start event:`, eventError)
+        // Don't fail the request, but log the error
+      } else {
+        console.log(`[${FUNCTION_NAME}] Start event written successfully`)
+      }
     } else {
       console.log(`[${FUNCTION_NAME}] Reusing session:`, activeSession.id)
     }
@@ -298,6 +319,7 @@ serve(async (req) => {
         exam_type: exam.exam_type,
         duration_minutes: exam.duration_min,
         total_questions: examQuestions.length,
+        course_id: exam.course_id,
         course_code: exam.courses.code,
         course_name: exam.courses.name,
       },

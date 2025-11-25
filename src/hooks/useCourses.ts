@@ -10,7 +10,7 @@
  */
 
 import { useQuery, useSuspenseQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchCourses, fetchCourse, fetchTopics, fetchTopic, createCourse } from '@/lib/api'
+import { fetchCourses, fetchAdminCourses, fetchCourse, fetchTopics, fetchTopic, createCourse } from '@/lib/api'
 import { queryKeys } from '@/lib/queryClient'
 
 /**
@@ -34,6 +34,18 @@ export function useCoursesSuspense() {
     queryKey: queryKeys.courses.all,
     queryFn: fetchCourses,
     staleTime: 10 * 60 * 1000,
+  })
+}
+
+/**
+ * ✅ IMPLEMENTED: Fetch admin-defined courses only
+ * Used for "Choose from Courses" modal
+ */
+export function useAdminCourses() {
+  return useQuery({
+    queryKey: [...queryKeys.courses.all, 'admin'],
+    queryFn: fetchAdminCourses,
+    staleTime: 10 * 60 * 1000, // 10 minutes
   })
 }
 
@@ -85,6 +97,8 @@ export function useCreateCourse() {
       createCourse(code, name, term),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.courses.all })
+      // Note: Admin courses query doesn't need invalidation since user-created courses
+      // are marked as is_admin_defined = false and won't appear in admin courses
     },
   })
 }

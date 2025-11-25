@@ -27,21 +27,26 @@
  */
 
 import { useState, useEffect } from 'react'
+import { useDebouncedCallback } from 'use-debounce'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Flag, ChevronLeft, ChevronRight, Loader2, AlertCircle, BookOpen } from 'lucide-react'
+import { Flag, ChevronLeft, ChevronRight, Loader2, AlertCircle, BookOpen, CheckCircle2, XCircle } from 'lucide-react'
 import { useAuth } from '@/components/auth/AuthProvider'
 import {
   fetchExamSessionWithQuestions,
   submitExamAnswer,
+  updateExamAnswerFlag,
   fetchExamAnswers,
+  updateExamSessionTimeRemaining,
 } from '@/lib/api'
+import { writeExamEvent } from '@/lib/api-extensions'
 import { useSubmitExam } from '@/hooks/useSessions'
 import { QuestionCard } from '../shared/QuestionCard'
 import { ExamTimer } from './ExamTimer'
 import { QuestionNavigator } from './QuestionNavigator'
 import { SubmitExamModal } from './SubmitExamModal'
 import { PDFViewerModal } from '../shared/PDFViewer'
+import { AIAssistant } from '../shared/AIAssistant'
 import { supabase } from '@/lib/supabase'
 import type { CreateExamSessionResponse } from '@/types/api'
 
@@ -65,6 +70,12 @@ export function ExamSimulation() {
     title: string
     page?: number
   } | null>(null)
+  const [timeRemainingSec, setTimeRemainingSec] = useState<number | null>(null)
+  const [saveStatus, setSaveStatus] = useState<{
+    questionId: string | null
+    status: 'saving' | 'saved' | 'error'
+  }>({ questionId: null, status: 'saved' })
+  const [failedSaves, setFailedSaves] = useState<Set<string>>(new Set())
 
   // ==================== QUERIES ====================
 
@@ -110,27 +121,199 @@ export function ExamSimulation() {
     enabled: !!currentQuestion?.topic_id,
   })
 
-  // Load saved answers into state
+  // Load saved answers and flags from snapshot (faster resume)
   useEffect(() => {
-    if (savedAnswers && savedAnswers.length > 0) {
+    if (session && (session as any).answers && (session as any).state) {
+      const snapshotAnswers = (session as any).answers || {}
+      const snapshotState = (session as any).state || {}
+      const snapshotFlags = snapshotState.flags || {}
+      
+      // Convert snapshot to state
       const answersMap: Record<string, string> = {}
-      savedAnswers.forEach((answer: any) => {
-        answersMap[answer.question_id] = answer.user_answer
+      const flaggedSet = new Set<string>()
+      
+      Object.entries(snapshotAnswers).forEach(([questionId, answer]) => {
+        if (answer && typeof answer === 'string') {
+          answersMap[questionId] = answer
+        }
       })
+      
+      Object.entries(snapshotFlags).forEach(([questionId, isFlagged]) => {
+        if (isFlagged === true) {
+          flaggedSet.add(questionId)
+        }
+      })
+      
       setAnswers(answersMap)
+      setFlagged(flaggedSet)
+      
+      // Resume to saved current_question_index or last answered question
+      const savedIndex = (session as any).current_question_index ?? 0
+      if (savedIndex >= 0 && savedIndex < session.questions.length) {
+        setCurrentQuestionIndex(savedIndex)
+      } else {
+        // Fallback: find last answered question
+        let lastAnsweredIndex = 0
+        session.questions.forEach((q, idx) => {
+          if (answersMap[q.id]) {
+            lastAnsweredIndex = idx
+          }
+        })
+        setCurrentQuestionIndex(lastAnsweredIndex)
+      }
+    } else if (savedAnswers && savedAnswers.length > 0) {
+      // Fallback to old method if snapshot not available
+      const answersMap: Record<string, string> = {}
+      const flaggedSet = new Set<string>()
+      let lastAnsweredIndex = 0
+      
+      savedAnswers.forEach((answer: any) => {
+        if (answer.user_answer) {
+          answersMap[answer.question_id] = answer.user_answer
+          const questionIndex = session?.questions.findIndex(q => q.id === answer.question_id) ?? -1
+          if (questionIndex > lastAnsweredIndex) {
+            lastAnsweredIndex = questionIndex
+          }
+        }
+        if (answer.is_flagged) {
+          flaggedSet.add(answer.question_id)
+        }
+      })
+      
+      setAnswers(answersMap)
+      setFlagged(flaggedSet)
+      setCurrentQuestionIndex(lastAnsweredIndex)
     }
-  }, [savedAnswers])
+  }, [savedAnswers, session])
 
   // ==================== MUTATIONS ====================
 
-  // Save individual answer
+  // Save individual answer with retry logic
   const saveAnswerMutation = useMutation({
-    mutationFn: ({ questionId, answer }: { questionId: string; answer: string }) =>
-      submitExamAnswer(sessionId!, questionId, answer),
+    mutationFn: ({ questionId, answer, isFlagged }: { questionId: string; answer: string; isFlagged?: boolean }) =>
+      submitExamAnswer(sessionId!, questionId, answer, isFlagged),
+    retry: 2,
+    retryDelay: 1000,
+    onSuccess: (data, variables) => {
+      console.log('[ExamSimulation] Answer saved successfully:', variables.questionId)
+      setSaveStatus({ questionId: variables.questionId, status: 'saved' })
+      setFailedSaves((prev) => {
+        const next = new Set(prev)
+        next.delete(variables.questionId)
+        return next
+      })
+      // Clear saved status after 2 seconds
+      setTimeout(() => {
+        setSaveStatus((prev) => 
+          prev.questionId === variables.questionId && prev.status === 'saved'
+            ? { questionId: null, status: 'saved' }
+            : prev
+        )
+      }, 2000)
+    },
+    onError: (error, variables) => {
+      console.error('[ExamSimulation] Failed to save answer:', error, variables)
+      setSaveStatus({ questionId: variables.questionId, status: 'error' })
+      setFailedSaves((prev) => new Set(prev).add(variables.questionId))
+    },
+  })
+
+  // Debounced save answer function (10s debounce if staying on question)
+  const debouncedSaveAnswer = useDebouncedCallback(
+    (questionId: string, answer: string, isFlagged: boolean) => {
+      setSaveStatus({ questionId, status: 'saving' })
+      saveAnswerMutation.mutate(
+        { questionId, answer, isFlagged },
+        {
+          onError: (error) => {
+            console.error('[ExamSimulation] Failed to save answer after debounce:', error)
+            // Retry once more after error
+            setTimeout(() => {
+              saveAnswerMutation.mutate({ questionId, answer, isFlagged })
+            }, 2000)
+          },
+        }
+      )
+    },
+    10000 // 10s debounce (reduced write frequency for cost optimization)
+  )
+  
+  // Immediate save on navigate (no debounce)
+  const immediateSaveAnswer = (questionId: string, answer: string, isFlagged: boolean) => {
+    setSaveStatus({ questionId, status: 'saving' })
+    saveAnswerMutation.mutate({ questionId, answer, isFlagged })
+  }
+
+  // Save flag status
+  const saveFlagMutation = useMutation({
+    mutationFn: ({ questionId, isFlagged }: { questionId: string; isFlagged: boolean }) =>
+      updateExamAnswerFlag(sessionId!, questionId, isFlagged),
   })
 
   // Submit exam (server-side scoring)
   const submitExamMutation = useSubmitExam()
+  
+  // Update time remaining mutation
+  const updateTimeMutation = useMutation({
+    mutationFn: (timeRemainingSec: number) =>
+      updateExamSessionTimeRemaining(sessionId!, timeRemainingSec),
+  })
+
+  // Initialize time remaining from session or localStorage backup
+  useEffect(() => {
+    if (session && sessionId) {
+      // Check localStorage for backup time first
+      try {
+        const backupData = localStorage.getItem(`exam_time_${sessionId}`)
+        if (backupData) {
+          const backup = JSON.parse(backupData)
+          // Use backup if it's recent (within 5 minutes) and session time is null or older
+          if (Date.now() - backup.timestamp < 5 * 60 * 1000) {
+            if (session.time_remaining_sec === null || backup.time_remaining_sec < session.time_remaining_sec) {
+              console.log('[ExamSimulation] Restoring time from localStorage backup:', backup.time_remaining_sec)
+              setTimeRemainingSec(backup.time_remaining_sec)
+              // Update database with backup time
+              updateTimeMutation.mutate(backup.time_remaining_sec)
+              localStorage.removeItem(`exam_time_${sessionId}`)
+              return
+            }
+          } else {
+            localStorage.removeItem(`exam_time_${sessionId}`)
+          }
+        }
+      } catch (error) {
+        console.error('[ExamSimulation] Failed to read localStorage backup:', error)
+      }
+      
+      // Use session time_remaining_sec
+      if (session.time_remaining_sec !== undefined && timeRemainingSec === null) {
+        setTimeRemainingSec(session.time_remaining_sec)
+        console.log('[ExamSimulation] Initialized time from session:', session.time_remaining_sec)
+      }
+    }
+  }, [session, sessionId, timeRemainingSec, updateTimeMutation])
+  
+  // Save time remaining on page unload (beforeunload)
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (timeRemainingSec !== null && timeRemainingSec > 0 && session) {
+        // Use localStorage as backup since sendBeacon requires endpoint
+        try {
+          localStorage.setItem(`exam_time_${sessionId}`, JSON.stringify({
+            session_id: sessionId,
+            time_remaining_sec: timeRemainingSec,
+            timestamp: Date.now()
+          }))
+          console.log('[ExamSimulation] Saved time to localStorage on beforeunload:', timeRemainingSec)
+        } catch (error) {
+          console.error('[ExamSimulation] Failed to save to localStorage:', error)
+        }
+      }
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [sessionId, timeRemainingSec, session])
 
   // ==================== HANDLERS ====================
 
@@ -141,44 +324,133 @@ export function ExamSimulation() {
     const newAnswers = { ...answers, [currentQuestion.id]: answerId }
     setAnswers(newAnswers)
 
-    // Auto-save answer to database
-    saveAnswerMutation.mutate({
-      questionId: currentQuestion.id,
-      answer: answerId,
-    })
+    // Auto-save answer to database (include current flag status) - debounced
+    const isCurrentlyFlagged = flagged.has(currentQuestion.id)
+    debouncedSaveAnswer(currentQuestion.id, answerId, isCurrentlyFlagged)
   }
+  
+  // Retry failed saves on window focus/blur
+  useEffect(() => {
+    const handleFocus = () => {
+      if (failedSaves.size > 0) {
+        console.log('[ExamSimulation] Window focused, retrying failed saves:', Array.from(failedSaves))
+        // Retry all failed saves
+        failedSaves.forEach((questionId) => {
+          const answer = answers[questionId]
+          if (answer) {
+            const isFlagged = flagged.has(questionId)
+            saveAnswerMutation.mutate({ questionId, answer, isFlagged })
+          }
+        })
+      }
+    }
+    
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [failedSaves, answers, flagged, saveAnswerMutation])
 
   const handleToggleFlag = () => {
     if (!session) return
 
     const currentQuestion = session.questions[currentQuestionIndex]
     const newFlagged = new Set(flagged)
+    const isCurrentlyFlagged = newFlagged.has(currentQuestion.id)
 
-    if (newFlagged.has(currentQuestion.id)) {
+    if (isCurrentlyFlagged) {
       newFlagged.delete(currentQuestion.id)
     } else {
       newFlagged.add(currentQuestion.id)
     }
 
     setFlagged(newFlagged)
+
+    // Save flag status to database
+    saveFlagMutation.mutate({
+      questionId: currentQuestion.id,
+      isFlagged: !isCurrentlyFlagged,
+    })
   }
 
   const handleNext = () => {
     if (!session) return
 
     if (currentQuestionIndex < session.questions.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1)
+      const fromIndex = currentQuestionIndex
+      const toIndex = currentQuestionIndex + 1
+      
+      // Save current answer immediately before navigating
+      const currentQuestion = session.questions[fromIndex]
+      const currentAnswer = answers[currentQuestion.id]
+      if (currentAnswer) {
+        const isFlagged = flagged.has(currentQuestion.id)
+        immediateSaveAnswer(currentQuestion.id, currentAnswer, isFlagged)
+      }
+      
+      // Write navigate event
+      writeExamEvent(sessionId!, 'navigate', {
+        fromIndex,
+        toIndex,
+      }).catch((err: any) => console.error('[ExamSimulation] Failed to write navigate event:', err))
+      
+      setCurrentQuestionIndex(toIndex)
     }
   }
 
   const handlePrevious = () => {
+    if (!session) return
+    
     if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1)
+      const fromIndex = currentQuestionIndex
+      const toIndex = currentQuestionIndex - 1
+      
+      // Save current answer immediately before navigating
+      const currentQuestion = session.questions[fromIndex]
+      const currentAnswer = answers[currentQuestion.id]
+      if (currentAnswer) {
+        const isFlagged = flagged.has(currentQuestion.id)
+        immediateSaveAnswer(currentQuestion.id, currentAnswer, isFlagged)
+      }
+      
+      // Write navigate event
+      writeExamEvent(sessionId!, 'navigate', {
+        fromIndex,
+        toIndex,
+      }).catch((err: any) => console.error('[ExamSimulation] Failed to write navigate event:', err))
+      
+      setCurrentQuestionIndex(toIndex)
     }
   }
 
   const handleNavigateToQuestion = (questionNumber: number) => {
-    setCurrentQuestionIndex(questionNumber - 1)
+    if (!session) return
+    
+    // Validate question number is within bounds
+    if (questionNumber < 1 || questionNumber > session.questions.length) {
+      console.error('[ExamSimulation] Invalid question number:', questionNumber)
+      return
+    }
+    
+    const fromIndex = currentQuestionIndex
+    const toIndex = questionNumber - 1
+    
+    // Save current answer immediately before navigating
+    const currentQuestion = session.questions[fromIndex]
+    if (currentQuestion) {
+      const currentAnswer = answers[currentQuestion.id]
+      if (currentAnswer) {
+        const isFlagged = flagged.has(currentQuestion.id)
+        immediateSaveAnswer(currentQuestion.id, currentAnswer, isFlagged)
+      }
+    }
+    
+    // Write navigate event (allow navigation to any question)
+    writeExamEvent(sessionId!, 'navigate', {
+      fromIndex,
+      toIndex,
+    }).catch((err: any) => console.error('[ExamSimulation] Failed to write navigate event:', err))
+    
+    // Navigate to the selected question
+    setCurrentQuestionIndex(toIndex)
   }
 
   const handleTimeUp = () => {
@@ -192,6 +464,11 @@ export function ExamSimulation() {
     setIsSubmitting(true)
 
     try {
+      // Write submit event
+      await writeExamEvent(sessionId!, 'submit', {
+        submittedAt: new Date().toISOString(),
+      }).catch((err: any) => console.error('[ExamSimulation] Failed to write submit event:', err))
+      
       // Submit exam via edge function (server-side scoring)
       const result = await submitExamMutation.mutateAsync({
         session_id: session.session_id,
@@ -210,15 +487,73 @@ export function ExamSimulation() {
     }
   }
 
-  const handleExit = () => {
+  const handleExit = async () => {
     const confirmExit = window.confirm(
       'Are you sure you want to exit? Your answers have been saved and you can resume later.'
     )
 
-    if (confirmExit && session) {
-      navigate(`/exam/${session.exam.id}`)
+    if (confirmExit && session && timeRemainingSec !== null) {
+      // Save current time remaining before exiting
+      try {
+        await updateTimeMutation.mutateAsync(timeRemainingSec)
+        console.log('[ExamSimulation] Time saved successfully on exit:', timeRemainingSec)
+      } catch (error) {
+        console.error('[ExamSimulation] Failed to save time remaining:', error)
+        // Show error but still allow exit
+        alert('Warning: Time remaining may not have been saved. Your answers are saved.')
+      }
+      
+      // Navigate back to exam landing page (/course/:courseId/exam) - ExamView component
+      // Try multiple ways to get course_id
+      let courseId = session.exam.course_id || 
+                     (session.exam as any).course_id ||
+                     (sessionFromState?.exam as any)?.course_id ||
+                     (sessionData?.exam as any)?.course_id
+      
+      if (courseId) {
+        // Navigate to exam landing page (ExamView component) - shows list of exams
+        navigate(`/course/${courseId}/exam`, { replace: true })
+      } else {
+        console.error('No course_id found in session, falling back to courses page')
+        // Fallback: navigate to courses page
+        navigate('/courses', { replace: true })
+      }
     }
   }
+  
+  // Periodic save of time remaining (every 10 seconds) - Optimized for event log pattern
+  useEffect(() => {
+    if (!session || timeRemainingSec === null || timeRemainingSec <= 0) return
+    
+    const interval = setInterval(() => {
+      // Use current state value, not stale closure
+      setTimeRemainingSec((current) => {
+        if (current > 0 && !isSubmitting) {
+          console.log('[ExamSimulation] Periodic save - saving time:', current)
+          updateTimeMutation.mutate(current, {
+            onSuccess: () => {
+              console.log('[ExamSimulation] Time saved successfully:', current)
+            },
+            onError: (error) => {
+              console.error('[ExamSimulation] Failed to save time remaining:', error)
+              // Retry once after 2 seconds
+              setTimeout(() => {
+                setTimeRemainingSec((retryValue) => {
+                  if (retryValue > 0) {
+                    updateTimeMutation.mutate(retryValue)
+                  }
+                  return retryValue
+                })
+              }, 2000)
+            }
+          })
+        }
+        return current
+      })
+    }, 10000) // Every 10 seconds (reduced from 30s for better resume capability)
+    
+    return () => clearInterval(interval)
+  }, [session, isSubmitting, updateTimeMutation]) // Remove timeRemainingSec from deps
 
   const handleOpenPdf = (documentId: string, title: string, page?: number) => {
     const doc = sourceDocuments?.find(d => d.id === documentId)
@@ -311,8 +646,9 @@ export function ExamSimulation() {
               <ExamTimer
                 durationMinutes={session.exam.duration_minutes}
                 startTime={new Date(session.started_at)}
-                timeRemainingSec={session.time_remaining_sec}
+                timeRemainingSec={timeRemainingSec ?? session.time_remaining_sec}
                 onTimeUp={handleTimeUp}
+                onTick={(remainingSec) => setTimeRemainingSec(remainingSec)}
               />
               <button
                 onClick={handleExit}
@@ -515,6 +851,17 @@ export function ExamSimulation() {
           documentTitle={selectedPdf.title}
           initialPage={selectedPdf.page || 1}
           onClose={() => setSelectedPdf(null)}
+        />
+      )}
+
+      {/* AI Assistant - Always Available */}
+      {session && currentQuestion && (
+        <AIAssistant 
+          context={currentQuestion.prompt}
+          questionId={currentQuestion.id}
+          courseId={session.exam.course_id}
+          mode="exam"
+          placeholder="Ask about this question..."
         />
       )}
     </div>

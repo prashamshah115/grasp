@@ -6,6 +6,7 @@ interface ExamTimerProps {
   startTime?: Date // Optional: if provided, calculates elapsed time
   timeRemainingSec?: number // Optional: if provided, uses this directly (for resuming exams)
   onTimeUp: () => void
+  onTick?: (remainingSec: number) => void // Callback for each tick
   isPaused?: boolean
 }
 
@@ -14,6 +15,7 @@ export function ExamTimer({
   startTime,
   timeRemainingSec,
   onTimeUp,
+  onTick,
   isPaused = false,
 }: ExamTimerProps) {
   // Calculate initial seconds remaining
@@ -57,9 +59,12 @@ export function ExamTimer({
       setSecondsRemaining((prev) => {
         if (prev <= 1) {
           onTimeUp()
+          if (onTick) onTick(0)
           return 0
         }
-        return prev - 1
+        const newValue = prev - 1
+        if (onTick) onTick(newValue)
+        return newValue
       })
     }, 1000)
 

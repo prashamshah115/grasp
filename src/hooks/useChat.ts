@@ -139,6 +139,7 @@ export function useSendMessage() {
           thread_id: request.thread_id,
           course_id: request.course_id,
           topic_id: request.topic_id,
+          questionId: request.question_id,
           message: request.message,
           compressionNotes: request.compression_notes,
         },
@@ -162,12 +163,13 @@ export function useSendMessage() {
 export interface UseChatOptions {
   topicId?: string | null
   courseId?: string | null
+  questionId?: string | null
   compressionNotes?: string | null
   onNewMessage?: (message: UIMessage) => void
 }
 
 export function useChat(options: UseChatOptions = {}) {
-  const { topicId, courseId, compressionNotes, onNewMessage } = options
+  const { topicId, courseId, questionId, compressionNotes, onNewMessage } = options
   const { user } = useAuth()
   const queryClient = useQueryClient()
   
@@ -278,6 +280,7 @@ export function useChat(options: UseChatOptions = {}) {
         thread_id: thread?.id,
         course_id: courseId || undefined,
         topic_id: topicId || undefined,
+        question_id: questionId || undefined,
         message: content.trim(),
         compression_notes: compressionNotes || undefined,
       })

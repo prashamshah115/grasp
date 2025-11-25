@@ -67,6 +67,7 @@ export interface SendMessageRequest {
   thread_id?: string
   course_id?: string
   topic_id?: string
+  question_id?: string
   message: string
   compression_notes?: string
 }

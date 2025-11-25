@@ -91,7 +91,33 @@ export async function fetchCourse(courseId: string) {
 }
 
 /**
+ * ✅ IMPLEMENTED: Fetch admin-defined courses only
+ * Used for "Choose from Courses" modal - excludes user-created courses
+ */
+export async function fetchAdminCourses() {
+  const { data, error } = await supabase
+    .from('courses')
+    .select('*')
+    .eq('is_admin_defined', true)
+    .order('code', { ascending: true })
+
+  if (error) handleSupabaseError(error)
+  
+  // Filter out test courses
+  const filtered = (data || []).filter((course) => {
+    const isTestCourse = 
+      course.id === '11111111-1111-1111-1111-111111111111' ||
+      course.name?.toLowerCase().includes('test course') ||
+      course.code?.toLowerCase().includes('test');
+    return !isTestCourse;
+  });
+  
+  return filtered
+}
+
+/**
  * ✅ IMPLEMENTED: Create a new course
+ * User-created courses are marked as is_admin_defined = false
  */
 export async function createCourse(code: string, name: string, term?: string) {
   const user = await requireAuth()
@@ -106,6 +132,7 @@ export async function createCourse(code: string, name: string, term?: string) {
       code: code.trim().toUpperCase(),
       name: name.trim(),
       term: term || null,
+      is_admin_defined: false, // User-created courses are not admin-defined
     })
     .select()
     .single()
@@ -392,33 +419,98 @@ export async function fetchExamSession(sessionId: string) {
 }
 
 /**
+ * ✅ NEW: Update time remaining for an exam session
+ * Used for saving progress when exiting or periodically
+ */
+export async function updateExamSessionTimeRemaining(
+  sessionId: string,
+  timeRemainingSec: number
+) {
+  // Use event log pattern - write time_update event
+  // Snapshot will be updated automatically via database trigger
+  const { writeExamEvent } = await import('./api-extensions')
+  return writeExamEvent(sessionId, 'time_update', {
+    timeRemainingSec: Math.max(0, timeRemainingSec),
+  })
+}
+
+/**
  * ✅ IMPLEMENTED: Get active exam sessions for a course
  * Used for exam resumption feature
  */
 export async function getActiveExamSessions(courseId: string) {
   const user = await requireAuth()
 
-  const { data, error } = await supabase
+  console.log('[getActiveExamSessions] Fetching active sessions for course:', courseId, 'user:', user.id)
+
+  // First, get all active sessions for the user
+  const { data: allActiveSessions, error: sessionsError } = await supabase
     .from('exam_sessions')
     .select(`
       id,
       exam_id,
       started_at,
       time_remaining_sec,
-      is_completed,
-      exams!inner(
-        id,
-        name,
-        course_id
-      )
+      is_completed
     `)
     .eq('user_id', user.id)
-    .eq('exams.course_id', courseId)
     .eq('is_completed', false)
     .order('started_at', { ascending: false })
 
-  if (error) handleSupabaseError(error)
-  return data || []
+  if (sessionsError) {
+    console.error('[getActiveExamSessions] Error fetching sessions:', sessionsError)
+    handleSupabaseError(sessionsError)
+    return []
+  }
+
+  if (!allActiveSessions || allActiveSessions.length === 0) {
+    console.log('[getActiveExamSessions] No active sessions found')
+    return []
+  }
+
+  console.log('[getActiveExamSessions] Found', allActiveSessions.length, 'active sessions')
+
+  // Get exam IDs from active sessions
+  const examIds = allActiveSessions.map(s => s.exam_id)
+
+  // Fetch exams for these exam IDs and filter by course_id
+  const { data: exams, error: examsError } = await supabase
+    .from('exams')
+    .select('id, name, course_id')
+    .in('id', examIds)
+    .eq('course_id', courseId)
+
+  if (examsError) {
+    console.error('[getActiveExamSessions] Error fetching exams:', examsError)
+    handleSupabaseError(examsError)
+    return []
+  }
+
+  if (!exams || exams.length === 0) {
+    console.log('[getActiveExamSessions] No exams found for course:', courseId)
+    return []
+  }
+
+  // Create set of exam IDs in this course
+  const courseExamIds = new Set(exams.map(e => e.id))
+
+  // Filter sessions to only include those for exams in this course
+  const filteredSessions = allActiveSessions
+    .filter(session => courseExamIds.has(session.exam_id))
+    .map(session => {
+      const exam = exams.find(e => e.id === session.exam_id)
+      return {
+        ...session,
+        exams: exam ? {
+          id: exam.id,
+          name: exam.name,
+          course_id: exam.course_id
+        } : null
+      }
+    })
+
+  console.log('[getActiveExamSessions] Returning', filteredSessions.length, 'sessions for course')
+  return filteredSessions
 }
 
 /**
@@ -441,6 +533,9 @@ export async function fetchExamSessionWithQuestions(
       started_at,
       time_remaining_sec,
       is_completed,
+      answers,
+      state,
+      current_question_index,
       exams!inner(
         id,
         name,
@@ -448,6 +543,7 @@ export async function fetchExamSessionWithQuestions(
         duration_min,
         course_id,
         courses!inner(
+          id,
           code,
           name
         )
@@ -469,10 +565,12 @@ export async function fetchExamSessionWithQuestions(
   const course = exam.courses
 
   // Fetch questions for this exam (WITHOUT correct_answer)
+  console.log('[fetchExamSessionWithQuestions] Fetching questions for exam:', session.exam_id)
   const { data: examQuestions, error: questionsError } = await supabase
     .from('exam_questions')
     .select(`
       question_id,
+      order_index,
       questions!inner(
         id,
         prompt,
@@ -484,11 +582,20 @@ export async function fetchExamSessionWithQuestions(
       )
     `)
     .eq('exam_id', session.exam_id)
-    .order('question_number', { ascending: true })
+    .order('order_index', { ascending: true })
 
   if (questionsError) {
+    console.error('[fetchExamSessionWithQuestions] Error fetching questions:', questionsError)
+    console.error('[fetchExamSessionWithQuestions] Error details:', {
+      message: questionsError.message,
+      details: questionsError.details,
+      hint: questionsError.hint,
+      code: questionsError.code
+    })
     throw questionsError
   }
+
+  console.log('[fetchExamSessionWithQuestions] Fetched', examQuestions?.length || 0, 'questions')
 
   // Calculate total questions
   const totalQuestions = examQuestions?.length || 0
@@ -512,14 +619,16 @@ export async function fetchExamSessionWithQuestions(
   let timeRemainingSec = session.time_remaining_sec
   
   if (timeRemainingSec === null || timeRemainingSec === undefined) {
-    // Calculate from start time
+    // Calculate from start time (fallback for new sessions)
     const durationMs = exam.duration_min * 60 * 1000
     const endsAt = new Date(startedAt.getTime() + durationMs)
     const timeRemainingMs = endsAt.getTime() - Date.now()
     timeRemainingSec = Math.max(0, Math.floor(timeRemainingMs / 1000))
   }
   
-  const endsAt = new Date(startedAt.getTime() + timeRemainingSec * 1000)
+  //   // Calculate ends_at based on CURRENT time + remaining time (not start time)
+  // This ensures time doesn't revert when resuming
+  const endsAt = new Date(Date.now() + timeRemainingSec * 1000)
 
   return {
     session_id: session.id,
@@ -529,6 +638,7 @@ export async function fetchExamSessionWithQuestions(
       exam_type: exam.exam_type,
       duration_minutes: exam.duration_min,
       total_questions: totalQuestions,
+      course_id: exam.course_id,
       course_code: course.code,
       course_name: course.name,
     },
@@ -536,6 +646,10 @@ export async function fetchExamSessionWithQuestions(
     started_at: session.started_at,
     ends_at: endsAt.toISOString(),
     time_remaining_sec: timeRemainingSec,
+    // Include snapshot fields for resume capability
+    answers: (session as any).answers || {},
+    state: (session as any).state || {},
+    current_question_index: (session as any).current_question_index || 0,
   }
 }
 
@@ -943,7 +1057,7 @@ export async function checkPremiumStatus() {
 
 /**
  * Upload course material file
- * Uses course-materials bucket and creates both course_uploads and documents records
+ * Uses user-content bucket (private, user-scoped) and creates both course_uploads and documents records
  * Note: courseId is required for course materials (documents table requires course_id)
  */
 export async function uploadCourseMaterial(file: File, courseId: string) {
@@ -956,9 +1070,9 @@ export async function uploadCourseMaterial(file: File, courseId: string) {
   // Generate unique path: {user_id}/{uuid}-{filename}
   const path = `${user.id}/${crypto.randomUUID()}-${file.name}`
   
-  // Upload to course-materials bucket
+  // Upload to user-content bucket (private, user-scoped)
   const { data: uploadData, error: uploadError } = await supabase.storage
-    .from('course-materials')
+    .from('user-content')
     .upload(path, file, {
       contentType: 'application/pdf',
       upsert: false
@@ -975,6 +1089,7 @@ export async function uploadCourseMaterial(file: File, courseId: string) {
       doc_type: 'slides',
       title: file.name,
       storage_path: path,
+      storage_bucket: 'user-content',
       total_pages: 0,
       has_images: false,
     })
@@ -1034,6 +1149,7 @@ export {
   fetchUserSessions,
   fetchSessionDetails,
   submitExamAnswer,
+  updateExamAnswerFlag,
   fetchExamAnswers,
   fetchUserExamSessions,
   fetchQuestionAttempts,

@@ -11,19 +11,21 @@
  * - NO props, NO mock data
  */
 
-import { ArrowLeft, Book, FileText, Zap, Target, RotateCcw, Layers, BookOpen } from 'lucide-react';
+import { ArrowLeft, Book, FileText, Zap, Target, Layers, BookOpen, Upload, TrendingUp } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useCourse, useTopics, useCourseMastery } from '@/hooks';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { MasteryRing } from './MasteryRing';
 import LoadingScreen from './LoadingScreen';
+import { MaterialsUploadModal } from './MaterialsUploadModal';
 
 export function CourseHome() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
   const { user, isLoading: authLoading } = useAuth();
   const [masteryMode, setMasteryMode] = useState<'pass' | 'a-level' | 'deep'>('a-level');
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   // Fetch course data - all hooks called unconditionally (before any early returns)
   const { data: course, isLoading: courseLoading } = useCourse(courseId!);
@@ -78,12 +80,11 @@ export function CourseHome() {
   };
   const practiceModesRow1 = [
     { id: 'quick-recall', icon: Zap, title: 'Quick Recall', desc: 'Instant warmup', route: 'practice' },
-    { id: 'weak-spots', icon: Target, title: 'Weak Spots', desc: 'Adaptive practice', route: 'practice' },
-    { id: 'exam-problems', icon: FileText, title: 'Exam Problems', desc: 'Past finals', route: 'exam' }
+    { id: 'weak-spots', icon: Target, title: 'Weak Spots', desc: 'Adaptive practice', route: 'practice' }
   ];
 
   const practiceModesRow2 = [
-    { id: 'mistake-replay', icon: RotateCcw, title: 'Mistake Replay', desc: 'Error correction', route: 'practice' },
+    { id: 'exam-problems', icon: FileText, title: 'Exam Problems', desc: 'Past finals', route: 'exam' },
     { id: 'compression', icon: Layers, title: 'Compression', desc: 'Build cheatsheet', route: 'compression' }
   ];
 
@@ -101,24 +102,58 @@ export function CourseHome() {
         </div>
 
         {/* Finals Readiness Section */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-20">
-          {/* Large Mastery Ring */}
-          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-10 flex flex-col items-center justify-center">
-            <MasteryRing percentage={masteryPercentage} size="lg" showLabel label="Finals Readiness" />
+        <div className="grid grid-cols-3 gap-4 mb-12">
+          {/* Finals Readiness */}
+          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all duration-200 group">
+            <div className="w-10 h-10 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-3 group-hover:bg-[#EEF2FF] transition-colors">
+              <MasteryRing percentage={masteryPercentage} size="sm" showLabel={false} />
+            </div>
+            <h3 className="text-base mb-1">Finals Readiness</h3>
+            <p className="text-xs text-[#6B7280]">{masteryPercentage}%</p>
           </div>
 
-          {/* Metrics */}
-          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-10 flex flex-col justify-center">
-            <div className="text-sm text-[#9CA3AF] mb-3">Coverage</div>
-            <div className="text-5xl mb-2">{totalTopics}</div>
-            <div className="text-sm text-[#6B7280]">Topics Covered</div>
+          {/* Coverage */}
+          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all duration-200 group">
+            <div className="w-10 h-10 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-3 group-hover:bg-[#EEF2FF] transition-colors">
+              <TrendingUp className="w-5 h-5 text-[#4F46E5]" />
+            </div>
+            <h3 className="text-base mb-1">Coverage</h3>
+            <p className="text-xs text-[#6B7280]">{totalTopics} Topics</p>
           </div>
 
-          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-10 flex flex-col justify-center">
-            <div className="text-sm text-[#9CA3AF] mb-3">Focus Areas</div>
-            <div className="text-5xl mb-2 text-[#EF4444]">{weakSpots}</div>
-            <div className="text-sm text-[#6B7280]">Weak Areas</div>
+          {/* Focus Areas */}
+          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all duration-200 group">
+            <div className="w-10 h-10 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-3 group-hover:bg-[#EEF2FF] transition-colors">
+              <Target className="w-5 h-5 text-[#EF4444]" />
+            </div>
+            <h3 className="text-base mb-1">Focus Areas</h3>
+            <p className="text-xs text-[#6B7280]">{weakSpots} Weak Areas</p>
           </div>
+        </div>
+
+        {/* Upload Materials Banner - Prominent */}
+        <div className="mb-20">
+          <button
+            onClick={() => setIsUploadModalOpen(true)}
+            className="w-full bg-gradient-to-br from-[#4F46E5] to-[#6366F1] hover:from-[#4338CA] hover:to-[#4F46E5] text-white rounded-[16px] p-10 text-left transition-all duration-300 shadow-lg hover:shadow-xl group relative overflow-hidden"
+          >
+            {/* Subtle gradient overlay */}
+            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+            
+            <div className="relative flex items-center gap-6">
+              <div className="w-16 h-16 rounded-[14px] bg-white/20 backdrop-blur-sm flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-300">
+                <Upload className="w-8 h-8 text-white" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-2xl mb-2 tracking-tight">Upload Your Course Materials</h3>
+                <p className="text-white/90">Add lecture slides, notes, PDFs, and study guides to personalize your learning</p>
+              </div>
+              <div className="hidden md:flex items-center gap-2 text-white/80 text-sm">
+                <span>Get Started</span>
+                <ArrowLeft className="w-4 h-4 rotate-180" />
+              </div>
+            </div>
+          </button>
         </div>
 
         {/* Mode Selector & Main CTA Section */}
@@ -175,8 +210,8 @@ export function CourseHome() {
           <h2 className="text-3xl mb-3">Practice Modes</h2>
           <p className="text-[#6B7280] mb-10">Choose any mode — enter whenever you need it</p>
           
-          {/* All modes in single grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Practice modes in 2 columns */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             {practiceModesRow1.map((mode) => (
               <button
                 key={mode.id}
@@ -190,6 +225,8 @@ export function CourseHome() {
                 <p className="text-sm text-[#6B7280]">{mode.desc}</p>
               </button>
             ))}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {practiceModesRow2.map((mode) => (
               <button
                 key={mode.id}
@@ -234,6 +271,14 @@ export function CourseHome() {
           </div>
         </div>
       </main>
+
+      {/* Upload Modal */}
+      <MaterialsUploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        courseId={courseId!}
+        courseName={course.name}
+      />
     </div>
   );
 }

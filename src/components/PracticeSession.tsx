@@ -30,6 +30,7 @@ import { useSubmitAnswer, useEndSession } from '@/hooks/useSessions'
 import { useUpdateMastery } from '@/hooks/useMastery'
 import { fetchSessionDetails } from '@/lib/api'
 import { PDFViewerModal } from '@/components/shared/PDFViewer'
+import { AIAssistant } from '@/components/shared/AIAssistant'
 import { supabase } from '@/lib/supabase'
 import type { Database } from '@/types/database'
 import type { SubmitAnswerResponse } from '@/types/api'
@@ -621,6 +622,17 @@ export function PracticeSession() {
           documentTitle={selectedPdf.title}
           initialPage={selectedPdf.page || 1}
           onClose={() => setSelectedPdf(null)}
+        />
+      )}
+
+      {/* AI Assistant - Always Available */}
+      {session && currentQuestion && (
+        <AIAssistant 
+          context={currentQuestion.prompt}
+          questionId={currentQuestion.id}
+          courseId={session.course_id}
+          mode="practice"
+          placeholder="Ask about this question..."
         />
       )}
     </div>

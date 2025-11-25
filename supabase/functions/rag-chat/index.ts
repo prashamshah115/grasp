@@ -301,6 +301,27 @@ serve(async (req) => {
     }
 
     // ------------------------------------------
+    // STEP 0 — FETCH QUESTION CONTEXT FIRST (if questionId provided)
+    // ------------------------------------------
+    let questionPrompt: string | null = null
+    if (normalizedQuestionId) {
+      console.log(`[rag-chat] Fetching question context for: ${normalizedQuestionId}`)
+      const { data: question } = await supabase
+        .from('questions')
+        .select('prompt')
+        .eq('id', normalizedQuestionId)
+        .maybeSingle()
+      if (question) {
+        questionPrompt = question.prompt || null
+        console.log(`[rag-chat] Question context loaded:`, {
+          prompt: questionPrompt ? questionPrompt.substring(0, 100) : null
+        })
+      } else {
+        console.warn(`[rag-chat] Question not found: ${normalizedQuestionId}`)
+      }
+    }
+
+    // ------------------------------------------
     // STEP 1 — BGE embedding (768d)
     // ------------------------------------------
     console.log('[rag-chat] Generating BGE embedding...')
@@ -348,73 +369,39 @@ serve(async (req) => {
 
     console.log('[rag-chat] Found', pages?.length || 0, 'pages')
 
-    // No matching pages → check if documents exist for this course/topic
+    // No matching pages → log but continue to LLM call (LLM can use its knowledge)
     if (!pages || pages.length === 0) {
-      // Check if documents exist at all for this course/topic (RLS will filter automatically)
-      let docCheckQuery = supabase
-        .from('documents')
-        .select('id, title, course_id, topic_id, owner_user_id')
-        .limit(5)
-
-      if (normalizedCourseId) {
-        docCheckQuery = docCheckQuery.eq('course_id', normalizedCourseId)
-      }
-      if (normalizedTopicId) {
-        docCheckQuery = docCheckQuery.eq('topic_id', normalizedTopicId)
-      }
-
-      const { data: docCheck, error: docCheckError } = await docCheckQuery
-
-      console.log(`[rag-chat] Document check: found ${docCheck?.length || 0} documents`, {
-        courseId,
-        topicId,
-        isEnrolled,
-        error: docCheckError?.message
-      })
-
-      if (docCheck && docCheck.length > 0) {
-        // Documents exist but no matching embeddings - might need processing
-        return successResponse({
-          answer:
-            "I found course materials but couldn't match them to your question. This might mean:\n\n1. Documents are still being processed (embeddings not generated yet)\n2. Your question doesn't match the content closely enough\n3. Try rephrasing your question or wait a few minutes for processing to complete.",
-          citations: [],
-          pages: []
-        } as RAGResponse)
-      }
-
-      return successResponse({
-        answer:
-          "I don't have enough context to answer this yet. Please upload course materials or documents for this topic. Once uploaded, documents will be processed automatically.",
-        citations: [],
-        pages: []
-      } as RAGResponse)
+      console.log(`[rag-chat] No course materials found, will use LLM knowledge with course/question context`)
     }
 
     // ------------------------------------------
     // STEP 3 — Build LLM context block
     // ------------------------------------------
-    const context = pages
-      .map(
-        (p: any, i: number) =>
-          `[Source ${i + 1}: ${p.doc_title}, Page ${p.page_number} (similarity ${(p.similarity * 100).toFixed(1)}%)]\n${p.content}`
-      )
-      .join('\n\n---\n\n')
+    const hasMaterials = pages && pages.length > 0
+    const context = hasMaterials
+      ? pages
+          .map(
+            (p: any, i: number) =>
+              `[Source ${i + 1}: ${p.doc_title}, Page ${p.page_number} (similarity ${(p.similarity * 100).toFixed(1)}%)]\n${p.content}`
+          )
+          .join('\n\n---\n\n')
+      : ''
 
     // ------------------------------------------
     // STEP 4 — ENHANCED SYSTEM PROMPT WITH CONTEXT AWARENESS
     // ------------------------------------------
     
     // Fetch course and topic names for better context
+    // Note: questionPrompt already fetched above (STEP 0)
     let courseName = null
     let topicName = null
-    let questionPrompt = null
     
     if (normalizedCourseId) {
       const { data: course } = await supabase
         .from('courses')
         .select('name, code')
         .eq('id', normalizedCourseId)
-        .single()
+        .maybeSingle()
       if (course) {
         courseName = `${course.code}: ${course.name}`
       }
@@ -425,20 +412,9 @@ serve(async (req) => {
         .from('topics')
         .select('name')
         .eq('id', normalizedTopicId)
-        .single()
+        .maybeSingle()
       if (topic) {
         topicName = topic.name
-      }
-    }
-    
-    if (normalizedQuestionId) {
-      const { data: question } = await supabase
-        .from('questions')
-        .select('prompt')
-        .eq('id', normalizedQuestionId)
-        .single()
-      if (question) {
-        questionPrompt = question.prompt
       }
     }
     
@@ -454,20 +430,27 @@ serve(async (req) => {
       contextInfo += `\nCURRENT QUESTION: ${questionPrompt.substring(0, 200)}${questionPrompt.length > 200 ? '...' : ''}`
     }
     
-    const systemPrompt = `You are GRASP, a concise AI tutor. Help students understand concepts using their course materials.
+    const systemPrompt = `You are GRASP, a concise AI tutor helping students with ${courseName || 'their coursework'}.
+
+${hasMaterials 
+  ? `COURSE MATERIALS (prefer these when relevant):
+${context}
 
 RULES:
+- PREFER information from course materials when available
+- If course materials don't cover the question, use your knowledge to help
 - Keep answers SHORT (3-5 sentences for simple questions, max 8-10 for complex ones)
 - Use bullet points for lists, not paragraphs
-- Answer ONLY from the provided materials
-- No citations or source references in your response
-- If info isn't in materials, say "Not covered in your materials"
+- No citations or source references in your response`
+  : `RULES:
+- Use your knowledge to help answer the question
+- Focus on ${courseName ? `the course: ${courseName}` : 'the subject matter'}
+- Keep answers SHORT (3-5 sentences for simple questions, max 8-10 for complex ones)
+- Use bullet points for lists, not paragraphs`
+}
 
 CONTEXT:
 ${contextInfo}
-
-MATERIALS:
-${context}
 
 Be direct and helpful. Get to the point quickly.`
 
@@ -488,7 +471,7 @@ Be direct and helpful. Get to the point quickly.`
     // ------------------------------------------
     // STEP 7 — format citations for UI
     // ------------------------------------------
-    const citations = pages.map((p: any) => ({
+    const citations = (pages || []).map((p: any) => ({
       documentTitle: p.doc_title,
       pageNumber: p.page_number,
       similarity: p.similarity,
@@ -509,7 +492,7 @@ Be direct and helpful. Get to the point quickly.`
       message_id: assistantMessageId || undefined,
       user_message_id: userMessageId || undefined,
       citations,
-      pages: pages.slice(0, 5)
+      pages: (pages || []).slice(0, 5)
     } as RAGResponse)
 
   } catch (error) {
