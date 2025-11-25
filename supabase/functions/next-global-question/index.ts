@@ -88,15 +88,7 @@ serve(async (req: Request) => {
       }
     }
 
-    // STEP 2 — Get list of questions already used in exams (to exclude from practice)
-    const { data: examQuestionIds } = await supabase
-      .from('exam_questions')
-      .select('question_id')
-    
-    const excludedQuestionIds = examQuestionIds?.map((eq: any) => eq.question_id) || []
-    console.log(`[${FUNCTION_NAME}] Excluding ${excludedQuestionIds.length} exam questions from practice`)
-
-    // STEP 3 — try spaced repetition RPC
+    // STEP 2 — try spaced repetition RPC (results already include is_exam_only flag)
     const { data: question, error: questionError } = await supabase
       .rpc('get_next_spaced_question', {
         target_user_id: user.id,
@@ -108,40 +100,48 @@ serve(async (req: Request) => {
       throw questionError
     }
 
-    // STEP 4 — Check if the spaced question is an exam question, if so skip it
+    // STEP 3 — Check if the spaced question is an exam-only question, if so skip it
     let selectedQuestion = null
     if (question && question.length > 0) {
-      // Filter out exam questions from RPC results
-      const nonExamQuestions = question.filter((q: any) => !excludedQuestionIds.includes(q.id))
+      // Filter out exam-only questions from RPC results
+      const nonExamQuestions = question.filter((q: any) => !q.is_exam_only)
       if (nonExamQuestions.length > 0) {
         selectedQuestion = nonExamQuestions[0]
       }
     }
 
-    // STEP 5 — fallback: random lowest-difficulty question (excluding exam questions)
+    // STEP 4 — fallback: pick a random low-difficulty question that is NOT exam-only
     if (!selectedQuestion) {
       console.log('[next-global-question] No spaced question, using fallback')
 
-      let fallbackQuery = supabase
+      const { data: fallbackQuestions, error: fallbackError } = await supabase
         .from('questions')
         .select('*')
+        .eq('is_exam_only', false)
         .in('topic_id', targetTopicIds)
         .order('difficulty', { ascending: true })
-      
-      // Exclude exam questions if any exist
-      if (excludedQuestionIds.length > 0) {
-        fallbackQuery = fallbackQuery.not('id', 'in', `(${excludedQuestionIds.join(',')})`)
-      }
-      
-      const { data: fallbackQuestion, error: fallbackError } = await fallbackQuery
-        .limit(1)
-        .single()
+        .limit(25)
 
-      if (fallbackError || !fallbackQuestion) {
+      if (fallbackError) {
+        console.error('[next-global-question] Fallback query error:', fallbackError)
+        throw fallbackError
+      }
+
+      const availableQuestions = fallbackQuestions || []
+      if (availableQuestions.length === 0) {
         throw new NotFoundError('No practice questions available (all questions may be assigned to exams)')
       }
 
-      console.log(`[${FUNCTION_NAME}] Using fallback ID:`, fallbackQuestion.id)
+      const randomIndex = Math.floor(Math.random() * availableQuestions.length)
+      const fallbackQuestion = availableQuestions[randomIndex]
+
+      console.log(
+        `[${FUNCTION_NAME}] Using fallback ID:`,
+        fallbackQuestion?.id,
+        'from',
+        availableQuestions.length,
+        'candidates'
+      )
 
       return successResponse(fallbackQuestion)
     }
