@@ -155,6 +155,7 @@ export interface Database {
           difficulty: 1 | 2 | 3 | null
           source_ref: string | null
           created_at: string
+          is_exam_only: boolean
         }
         Insert: {
           id?: string
@@ -169,6 +170,7 @@ export interface Database {
           difficulty?: 1 | 2 | 3 | null
           source_ref?: string | null
           created_at?: string
+          is_exam_only?: boolean
         }
         Update: {
           id?: string
@@ -183,6 +185,7 @@ export interface Database {
           difficulty?: 1 | 2 | 3 | null
           source_ref?: string | null
           created_at?: string
+          is_exam_only?: boolean
         }
       }
       study_sessions: {
