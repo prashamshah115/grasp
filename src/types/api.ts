@@ -23,6 +23,8 @@ export interface RAGChatRequest {
   course_id?: string
   question_id?: string
   message: string
+  compression_notes?: string // Optional compression notes content for context
+  conversation_history?: Array<{ role: 'user' | 'assistant'; content: string }> // Recent conversation history for context
 }
 
 export interface RAGChatResponse {

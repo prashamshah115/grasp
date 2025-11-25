@@ -17,10 +17,14 @@ interface RAGRequest {
   topicId?: string
   courseId?: string
   questionId?: string // optional: practice question context
+  thread_id?: string // optional: existing thread ID for persistence
 }
 
 interface RAGResponse {
   answer: string
+  thread_id?: string // thread ID for persistence
+  message_id?: string // assistant message ID
+  user_message_id?: string // user message ID
   citations: Array<{
     documentTitle: string
     pageNumber: number
@@ -29,6 +33,103 @@ interface RAGResponse {
     publicUrl?: string
   }>
   pages: Array<any>
+}
+
+// ------------------------------------------
+// THREAD PERSISTENCE HELPERS
+// ------------------------------------------
+async function getOrCreateThread(
+  supabase: any,
+  userId: string,
+  courseId: string | null,
+  topicId: string | null,
+  existingThreadId?: string
+): Promise<string | null> {
+  try {
+    // If thread ID provided, verify it exists and belongs to user
+    if (existingThreadId) {
+      const { data: thread } = await supabase
+        .from('chat_threads')
+        .select('id')
+        .eq('id', existingThreadId)
+        .eq('user_id', userId)
+        .single()
+      
+      if (thread) return thread.id
+    }
+
+    // Try to find existing active thread for this user + topic
+    if (topicId) {
+      const { data: existing } = await supabase
+        .from('chat_threads')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('topic_id', topicId)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (existing) {
+        console.log('[rag-chat] Found existing thread:', existing.id)
+        return existing.id
+      }
+    }
+
+    // Create new thread
+    const { data: newThread, error } = await supabase
+      .from('chat_threads')
+      .insert({
+        user_id: userId,
+        course_id: courseId,
+        topic_id: topicId,
+        model: 'gpt-4-turbo-preview',
+      })
+      .select('id')
+      .single()
+
+    if (error) {
+      console.error('[rag-chat] Failed to create thread:', error)
+      return null
+    }
+
+    console.log('[rag-chat] Created new thread:', newThread.id)
+    return newThread.id
+  } catch (err) {
+    console.error('[rag-chat] Thread error:', err)
+    return null
+  }
+}
+
+async function saveMessage(
+  supabase: any,
+  threadId: string,
+  userId: string,
+  role: 'user' | 'assistant',
+  content: string
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .insert({
+        thread_id: threadId,
+        user_id: userId,
+        role,
+        content,
+      })
+      .select('id')
+      .single()
+
+    if (error) {
+      console.error('[rag-chat] Failed to save message:', error)
+      return null
+    }
+
+    return data.id
+  } catch (err) {
+    console.error('[rag-chat] Message save error:', err)
+    return null
+  }
 }
 
 // ------------------------------------------
@@ -92,11 +193,11 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
       ],
-      temperature: 0.4, // Slightly higher for more natural, varied explanations
-      max_tokens: 1500, // Increased for comprehensive explanations
-      top_p: 0.9, // Nucleus sampling for better quality
-      frequency_penalty: 0.1, // Reduce repetition
-      presence_penalty: 0.1 // Encourage diverse topics
+      temperature: 0.3, // Lower for more focused responses
+      max_tokens: 400, // Shorter, concise answers
+      top_p: 0.9,
+      frequency_penalty: 0.2,
+      presence_penalty: 0.1
     })
   })
 
@@ -163,7 +264,7 @@ serve(async (req) => {
       throw new ValidationError('Message is required and cannot be empty')
     }
 
-    const { message, topicId, courseId, questionId } = body
+    const { message, topicId, courseId, questionId, thread_id } = body
 
     // Convert empty strings to null for UUID fields
     const normalizedTopicId = topicId && topicId.trim() !== '' ? topicId : null
@@ -175,8 +276,29 @@ serve(async (req) => {
       topicId: normalizedTopicId,
       courseId: normalizedCourseId,
       questionId: normalizedQuestionId,
+      threadId: thread_id,
       message: message.substring(0, 80)
     })
+
+    // ------------------------------------------
+    // THREAD PERSISTENCE (non-blocking)
+    // ------------------------------------------
+    let threadId: string | null = null
+    let userMessageId: string | null = null
+    
+    // Try to get or create thread (don't fail if this errors)
+    threadId = await getOrCreateThread(
+      supabase,
+      user.id,
+      normalizedCourseId,
+      normalizedTopicId,
+      thread_id
+    )
+    
+    // Save user message if we have a thread
+    if (threadId) {
+      userMessageId = await saveMessage(supabase, threadId, user.id, 'user', message)
+    }
 
     // ------------------------------------------
     // STEP 1 — BGE embedding (768d)
@@ -332,37 +454,22 @@ serve(async (req) => {
       contextInfo += `\nCURRENT QUESTION: ${questionPrompt.substring(0, 200)}${questionPrompt.length > 200 ? '...' : ''}`
     }
     
-    const systemPrompt = `You are GRASP, an advanced AI tutor specialized in university-level course instruction. Your role is to help students understand complex concepts through clear, structured explanations grounded in their course materials.
+    const systemPrompt = `You are GRASP, a concise AI tutor. Help students understand concepts using their course materials.
 
-CORE PRINCIPLES:
-1. **Ground Truth First**: Answer ONLY using the provided course materials. Never invent information or make assumptions beyond what's explicitly stated.
-2. **Progressive Disclosure**: Start with the core concept, then build complexity. Use analogies and examples when helpful.
-3. **Active Learning**: Encourage understanding over memorization. Ask clarifying questions when appropriate.
-4. **Citation Integrity**: Always cite sources using "[Source 1]", "[Source 2]" format. Include page numbers and document titles.
-5. **Honest Limitations**: If information is missing or unclear, explicitly state: "This isn't fully covered in the provided materials. You may want to consult [specific source] or ask your instructor."
+RULES:
+- Keep answers SHORT (3-5 sentences for simple questions, max 8-10 for complex ones)
+- Use bullet points for lists, not paragraphs
+- Answer ONLY from the provided materials
+- No citations or source references in your response
+- If info isn't in materials, say "Not covered in your materials"
 
-RESPONSE GUIDELINES:
-- **Structure**: Use clear headings, bullet points, and numbered lists for complex topics
-- **Depth**: Provide comprehensive explanations that build from fundamentals to advanced concepts
-- **Clarity**: Avoid jargon without explanation. Define technical terms on first use.
-- **Examples**: Include concrete examples, analogies, or visual descriptions when helpful
-- **Connections**: Link concepts to related topics when relevant
-- **Actionability**: When appropriate, suggest practice problems or study strategies
-
-CONTEXT AWARENESS:
+CONTEXT:
 ${contextInfo}
 
-COURSE MATERIALS PROVIDED:
+MATERIALS:
 ${context}
 
-IMPORTANT:
-- If the user's question requires information not in the provided materials, acknowledge this clearly
-- If multiple sources conflict, mention this and explain the differences
-- If a concept builds on prerequisite knowledge, briefly review those foundations
-- Maintain a supportive, encouraging tone while being academically rigorous
-- Adapt your explanation depth based on the complexity of the question
-
-Remember: Your goal is to help students achieve deep understanding, not just provide quick answers.`
+Be direct and helpful. Get to the point quickly.`
 
     // ------------------------------------------
     // STEP 5 — LLM call
@@ -371,7 +478,15 @@ Remember: Your goal is to help students achieve deep understanding, not just pro
     const answer = await callLLM(systemPrompt, message)
 
     // ------------------------------------------
-    // STEP 6 — format citations for UI
+    // STEP 6 — Save assistant message (non-blocking)
+    // ------------------------------------------
+    let assistantMessageId: string | null = null
+    if (threadId) {
+      assistantMessageId = await saveMessage(supabase, threadId, user.id, 'assistant', answer)
+    }
+
+    // ------------------------------------------
+    // STEP 7 — format citations for UI
     // ------------------------------------------
     const citations = pages.map((p: any) => ({
       documentTitle: p.doc_title,
@@ -381,11 +496,18 @@ Remember: Your goal is to help students achieve deep understanding, not just pro
       publicUrl: p.public_url
     }))
 
-    console.log(`[${FUNCTION_NAME}] Success`)
+    console.log(`[${FUNCTION_NAME}] Success`, {
+      threadId,
+      userMessageId,
+      assistantMessageId
+    })
 
     // Return success response with CORS headers
     return successResponse({
       answer,
+      thread_id: threadId || undefined,
+      message_id: assistantMessageId || undefined,
+      user_message_id: userMessageId || undefined,
       citations,
       pages: pages.slice(0, 5)
     } as RAGResponse)

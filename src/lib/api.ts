@@ -644,6 +644,8 @@ export async function ragChat(request: RAGChatRequest): Promise<RAGChatResponse>
           topicId: normalizedTopicId,
           courseId: normalizedCourseId,
           questionId: normalizedQuestionId,
+          compressionNotes: request.compression_notes,
+          conversationHistory: request.conversation_history,
         },
       }
     )

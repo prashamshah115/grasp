@@ -26,8 +26,11 @@ export * from './useMastery'
 // Sessions
 export * from './useSessions'
 
-// RAG Chat
+// RAG Chat (legacy)
 export * from './useRAGChat'
+
+// Chat (new persistent chat system)
+export * from './useChat'
 
 // Compression
 export * from './useCompression'

@@ -1,23 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Minimize2, Maximize2, Loader2 } from 'lucide-react';
+import { Sparkles, X, Send, Minimize2, Maximize2, Loader2, MessageSquare, RotateCcw } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { useRAGChat } from '@/hooks/useRAGChat';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-  citations?: Array<{
-    documentTitle: string;
-    pageNumber: number;
-    similarity: number;
-    docType: string;
-    publicUrl?: string;
-  }>;
-  pages?: Array<{ doc_title: string; page_number: number }>;
-}
+import { useChat } from '@/hooks/useChat';
+import type { UIMessage, ChatCitation } from '@/types/chat';
 
 interface AIAssistantProps {
   context?: string; // Current question or topic context (for display only)
@@ -26,6 +12,7 @@ interface AIAssistantProps {
   questionId?: string; // Question ID for RAG context (practice/exam questions)
   mode?: 'practice' | 'exam' | 'compression' | 'general'; // Current app mode for context-aware prompts
   placeholder?: string;
+  compressionNotes?: string; // Compression notes content for context
 }
 
 export function AIAssistant({ 
@@ -34,15 +21,32 @@ export function AIAssistant({
   courseId,
   questionId,
   mode = 'general',
-  placeholder 
+  placeholder,
+  compressionNotes
 }: AIAssistantProps) {
   const { courseId: urlCourseId } = useParams<{ courseId?: string }>();
   const { user } = useAuth();
-  const chatMutation = useRAGChat();
+  
+  // Use the new persistent chat hook
+  const {
+    thread,
+    messages: chatMessages,
+    isLoading,
+    isSending,
+    error: chatError,
+    sendMessage,
+    clearChat,
+  } = useChat({
+    topicId: topicId || undefined,
+    courseId: courseId || urlCourseId || undefined,
+    compressionNotes: compressionNotes || undefined,
+  });
   
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  
+  const [inputValue, setInputValue] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
   // Context-aware initial greeting
   const getInitialGreeting = () => {
     switch (mode) {
@@ -74,12 +78,6 @@ export function AIAssistant({
   
   // Context-aware prompt suggestions
   const getPromptSuggestions = () => {
-    const basePrompts = [
-      { text: 'Explain this step by step', icon: '💡' },
-      { text: 'What am I missing?', icon: '🤔' },
-      { text: 'Give me a hint', icon: '🎯' },
-    ];
-    
     switch (mode) {
       case 'practice':
         return [
@@ -102,96 +100,99 @@ export function AIAssistant({
           { text: 'What are common mistakes here?', icon: '⚠️' },
         ];
       default:
-        return basePrompts;
+        return [
+          { text: 'Explain this step by step', icon: '💡' },
+          { text: 'What am I missing?', icon: '🤔' },
+          { text: 'Give me a hint', icon: '🎯' },
+        ];
     }
   };
-  
-  const [messages, setMessages] = useState<Message[]>([
+
+  // Build display messages (combine greeting with chat history)
+  const displayMessages: UIMessage[] = [
+    // Initial greeting
     {
-      id: '1',
+      id: 'greeting',
+      thread_id: thread?.id || '',
+      user_id: null,
       role: 'assistant',
       content: getInitialGreeting(),
-      timestamp: new Date()
-    }
-  ]);
-  const [inputValue, setInputValue] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+      token_count: null,
+      model_used: null,
+      raw_response: null,
+      created_at: new Date().toISOString(),
+    },
+    // Chat messages from database/state
+    ...chatMessages,
+  ];
+
   const promptSuggestions = getPromptSuggestions();
 
+  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [displayMessages.length]);
 
   const handleSend = async () => {
-    if (!inputValue.trim() || !user) return;
+    if (!inputValue.trim() || !user || isSending) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: inputValue,
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
     const messageText = inputValue;
     setInputValue('');
+    
+    await sendMessage(messageText);
+  };
 
-    // Call real RAG API with full context
-    try {
-      // Don't send empty strings - use undefined instead (edge function expects null/undefined, not empty strings)
-      const response = await chatMutation.mutateAsync({
-        user_id: user.id,
-        topic_id: topicId || undefined,
-        course_id: courseId || urlCourseId || undefined,
-        question_id: questionId || undefined,
-        message: messageText,
-      });
-
-      if (!response || !response.answer) {
-        throw new Error('Invalid response from AI assistant');
-      }
-
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: response.answer,
-        citations: response.citations,
-        pages: response.pages,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, aiMessage]);
-    } catch (error: any) {
-      console.error('RAG chat error:', error);
-      
-      // Provide more helpful error messages
-      let errorContent = 'Sorry, I encountered an error processing your message. Please try again.';
-      
-      if (error?.message) {
-        if (error.message.includes('network') || error.message.includes('fetch')) {
-          errorContent = 'Network error: Please check your internet connection and try again.';
-        } else if (error.message.includes('401') || error.message.includes('unauthorized')) {
-          errorContent = 'Authentication error: Please refresh the page and try again.';
-        } else if (error.message.includes('429') || error.message.includes('rate limit')) {
-          errorContent = 'Rate limit exceeded: Please wait a moment and try again.';
-        } else if (error.message.includes('500') || error.message.includes('server')) {
-          errorContent = 'Server error: Our AI service is temporarily unavailable. Please try again in a moment.';
-        } else if (error.message.includes('API') || error.message.includes('credits') || error.message.includes('quota') || error.message.includes('billing')) {
-          errorContent = 'AI service unavailable: This may be due to API credits or billing issues. Please try again later or contact support.';
-        } else if (error.message.includes('Failed to invoke')) {
-          errorContent = 'AI service error: The AI assistant is temporarily unavailable. This may be due to API credits or service issues. Please try again later.';
-        }
-      }
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: errorContent,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, errorMessage]);
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
   };
 
+  const handleClearChat = () => {
+    clearChat();
+  };
+
+  // Render a single message
+  const renderMessage = (message: UIMessage) => {
+    const isUser = message.role === 'user';
+    const hasError = !!message.error;
+    
+    return (
+      <div
+        key={message.id}
+        className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+      >
+        <div
+          className={`max-w-[85%] rounded-[16px] px-4 py-3 ${
+            isUser
+              ? 'bg-[#4F46E5] text-white'
+              : hasError
+              ? 'bg-red-50 text-red-700 border border-red-200'
+              : 'bg-[#F9FAFB] text-[#374151] border border-[#E5E7EB]'
+          }`}
+        >
+          {!isUser && (
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles className={`w-3.5 h-3.5 ${hasError ? 'text-red-500' : 'text-[#4F46E5]'}`} />
+              <span className="text-xs font-medium text-[#6B7280]">AI</span>
+            </div>
+          )}
+          <div className="text-sm leading-relaxed whitespace-pre-wrap">
+            {message.content}
+          </div>
+{/* Sources hidden for cleaner UI */}
+          <div className={`text-xs mt-2 ${
+            isUser ? 'text-white/60' : 'text-[#9CA3AF]'
+          }`}>
+            {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Closed state - floating button
   if (!isOpen) {
     return (
       <button
@@ -200,10 +201,17 @@ export function AIAssistant({
       >
         <Sparkles className="w-7 h-7 text-white" />
         <div className="absolute -top-1 -right-1 w-3 h-3 bg-[#10B981] rounded-full animate-pulse"></div>
+        {/* Show message count badge if there are messages */}
+        {chatMessages.length > 0 && (
+          <div className="absolute -top-1 -left-1 w-5 h-5 bg-[#4F46E5] rounded-full flex items-center justify-center">
+            <span className="text-xs text-white font-medium">{chatMessages.length}</span>
+          </div>
+        )}
       </button>
     );
   }
 
+  // Minimized state
   if (isMinimized) {
     return (
       <div className="fixed bottom-6 right-6 z-50">
@@ -213,12 +221,16 @@ export function AIAssistant({
         >
           <Sparkles className="w-5 h-5 text-white" />
           <span className="text-white font-medium">AI Assistant</span>
+          {chatMessages.length > 0 && (
+            <span className="text-white/70 text-sm">({chatMessages.length})</span>
+          )}
           <Maximize2 className="w-4 h-4 text-white/70" />
         </button>
       </div>
     );
   }
 
+  // Full chat interface
   return (
     <div className="fixed bottom-6 right-6 w-[400px] h-[600px] bg-white rounded-[20px] shadow-2xl border border-[#E5E7EB] flex flex-col z-50">
       {/* Header */}
@@ -230,12 +242,23 @@ export function AIAssistant({
           <div>
             <h3 className="font-medium text-white">AI Assistant</h3>
             <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 bg-[#10B981] rounded-full"></div>
-              <span className="text-xs text-white/80">Always here to help</span>
+              <div className={`w-2 h-2 rounded-full ${isLoading ? 'bg-yellow-400 animate-pulse' : 'bg-[#10B981]'}`}></div>
+              <span className="text-xs text-white/80">
+                {isLoading ? 'Loading...' : isSending ? 'Thinking...' : 'Ready to help'}
+              </span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {chatMessages.length > 0 && (
+            <button
+              onClick={handleClearChat}
+              className="p-2 hover:bg-white/10 rounded-[8px] transition-colors"
+              title="Clear chat"
+            >
+              <RotateCcw className="w-4 h-4 text-white/70" />
+            </button>
+          )}
           <button
             onClick={() => setIsMinimized(true)}
             className="p-2 hover:bg-white/10 rounded-[8px] transition-colors"
@@ -251,55 +274,41 @@ export function AIAssistant({
         </div>
       </div>
 
+      {/* Thread indicator */}
+      {thread && (
+        <div className="px-4 py-2 bg-[#F9FAFB] border-b border-[#E5E7EB] flex items-center gap-2">
+          <MessageSquare className="w-3.5 h-3.5 text-[#6B7280]" />
+          <span className="text-xs text-[#6B7280]">
+            {chatMessages.length} message{chatMessages.length !== 1 ? 's' : ''} in this conversation
+          </span>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[85%] rounded-[16px] px-4 py-3 ${
-                message.role === 'user'
-                  ? 'bg-[#4F46E5] text-white'
-                  : 'bg-[#F9FAFB] text-[#374151] border border-[#E5E7EB]'
-              }`}
-            >
-              {message.role === 'assistant' && (
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-3.5 h-3.5 text-[#4F46E5]" />
-                  <span className="text-xs font-medium text-[#6B7280]">AI</span>
-                </div>
-              )}
-              <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                {message.content}
-              </div>
-              {message.citations && message.citations.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-[#E5E7EB]">
-                  <div className="text-xs text-[#6B7280] font-medium mb-1">Sources:</div>
-                  <div className="text-xs text-[#9CA3AF] space-y-1">
-                    {message.citations.map((citation, idx) => (
-                      <div key={idx} className="flex items-start gap-2">
-                        <span className="text-[#4F46E5] font-medium">{citation.documentTitle}</span>
-                        <span>• Page {citation.pageNumber}</span>
-                        {citation.similarity && (
-                          <span>• {(citation.similarity * 100).toFixed(0)}% match</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className={`text-xs mt-2 ${
-                message.role === 'user' ? 'text-white/60' : 'text-[#9CA3AF]'
-              }`}>
-                {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        {displayMessages.map(renderMessage)}
+        
+        {/* Loading indicator */}
+        {isSending && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] rounded-[16px] px-4 py-3 bg-[#F9FAFB] text-[#374151] border border-[#E5E7EB]">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 text-[#4F46E5] animate-spin" />
+                <span className="text-sm text-[#6B7280]">Thinking...</span>
               </div>
             </div>
           </div>
-        ))}
+        )}
+        
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Error display */}
+      {chatError && (
+        <div className="px-4 py-2 bg-red-50 border-t border-red-200">
+          <p className="text-xs text-red-600">{chatError}</p>
+        </div>
+      )}
 
       {/* Input */}
       <div className="border-t border-[#E5E7EB] p-4">
@@ -308,16 +317,17 @@ export function AIAssistant({
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+            onKeyDown={handleKeyPress}
             placeholder={getPlaceholder()}
-            className="flex-1 px-4 py-3 border border-[#E5E7EB] rounded-[12px] text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent"
+            disabled={isSending || isLoading}
+            className="flex-1 px-4 py-3 border border-[#E5E7EB] rounded-[12px] text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim() || chatMutation.isPending}
+            disabled={!inputValue.trim() || isSending || isLoading}
             className="w-12 h-12 bg-[#4F46E5] text-white rounded-[12px] flex items-center justify-center hover:bg-[#4338CA] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {chatMutation.isPending ? (
+            {isSending ? (
               <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
               <Send className="w-5 h-5" />
@@ -329,7 +339,8 @@ export function AIAssistant({
             <button
               key={idx}
               onClick={() => setInputValue(prompt.text)}
-              className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors"
+              disabled={isSending || isLoading}
+              className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {prompt.icon} {prompt.text}
             </button>

@@ -8,3 +8,4 @@ ADD CONSTRAINT user_course_unique UNIQUE (user_id, course_id);
 COMMENT ON CONSTRAINT user_course_unique ON user_courses IS 
 'Prevents duplicate enrollments - ensures each user can only be enrolled in each course once';
 
+

@@ -353,6 +353,7 @@ export function CompressionView() {
         courseId={courseId!}
         topicId={selectedTopicId || undefined}
         mode="compression"
+        compressionNotes={notes?.content_md}
       />
 
       {/* Upload Modal */}
