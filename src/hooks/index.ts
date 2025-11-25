@@ -43,3 +43,6 @@ export * from './useStorage'
 
 // User Courses & Course Uploads
 export * from './useUserCourses'
+
+// Finals
+export * from './useFinals'

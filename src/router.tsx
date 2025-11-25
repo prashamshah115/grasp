@@ -43,6 +43,10 @@ import { PracticeSession } from './components/PracticeSession'
 import ExamDefinition from './components/ExamDefinition'
 import ExamResults from './components/ExamResults'
 
+// Finals components
+import { FinalPackView } from './components/finals/FinalPackView'
+import { GradedAssignmentUpload } from './components/finals/GradedAssignmentUpload'
+
 // Auth & Error components (default exports)
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import { AuthCallback } from './components/auth/AuthCallback'
@@ -109,6 +113,16 @@ const routes: RouteObject[] = [
           {
             path: 'exam',
             element: <ExamView />,
+          },
+          // Finals - Final Pack
+          {
+            path: 'finals/pack',
+            element: <FinalPackView />,
+          },
+          // Finals - Upload graded assignment
+          {
+            path: 'finals/upload',
+            element: <GradedAssignmentUpload />,
           },
         ],
       },

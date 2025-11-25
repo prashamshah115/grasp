@@ -11,32 +11,29 @@
  * - NO props, NO mock data
  */
 
-import { ArrowLeft, Book, FileText, Zap, Target, Layers, BookOpen, Upload, TrendingUp } from 'lucide-react';
+import { Book, FileText, Zap, Target, Layers, Upload, GraduationCap } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
-import { useCourse, useTopics, useCourseMastery } from '@/hooks';
+import { useCourse } from '@/hooks';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { MasteryRing } from './MasteryRing';
 import LoadingScreen from './LoadingScreen';
 import { MaterialsUploadModal } from './MaterialsUploadModal';
+import { TaskCompressorCard } from './finals/TaskCompressorCard';
+import { FinalsSection } from './finals/FinalsSection';
 
 export function CourseHome() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
-  const { user, isLoading: authLoading } = useAuth();
+  const { isLoading: authLoading } = useAuth();
   const [masteryMode, setMasteryMode] = useState<'pass' | 'a-level' | 'deep'>('a-level');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isFinalsExpanded, setIsFinalsExpanded] = useState(false);
 
-  // Fetch course data - all hooks called unconditionally (before any early returns)
+  // Fetch course data
   const { data: course, isLoading: courseLoading } = useCourse(courseId!);
-  const { data: topics, isLoading: topicsLoading } = useTopics(courseId!);
-  const { data: mastery, isLoading: masteryLoading } = useCourseMastery(
-    user?.id,
-    courseId!
-  );
 
-  // Combine all loading states
-  const isLoading = authLoading || courseLoading || topicsLoading || masteryLoading;
+  // Loading state
+  const isLoading = authLoading || courseLoading;
 
   if (isLoading) {
     return <LoadingScreen message="Loading course..." />;
@@ -50,19 +47,6 @@ export function CourseHome() {
     );
   }
 
-  // Calculate mastery percentage
-  const totalAttempts = mastery?.reduce((sum, m) => sum + m.num_attempts, 0) || 0;
-  const correctAttempts = mastery?.reduce((sum, m) => sum + m.num_correct, 0) || 0;
-  const masteryPercentage = totalAttempts > 0 ? Math.round((correctAttempts / totalAttempts) * 100) : 0;
-
-  // Count weak spots
-  const weakSpots = mastery?.filter(m => m.mastery_level === 'weak').length || 0;
-  const totalTopics = topics?.length || 0;
-
-  const handleBack = () => {
-    navigate('/courses');
-  };
-
   const handleStartPractice = (mode?: { id: string; route: string }) => {
     if (mode?.route) {
       navigate(`/course/${courseId}/${mode.route}`);
@@ -72,11 +56,7 @@ export function CourseHome() {
   };
 
   const handleViewCheatsheet = () => {
-    navigate(`/course/${courseId}/compression`);
-  };
-
-  const handleViewNotes = () => {
-    navigate(`/course/${courseId}/compression`);
+    navigate(`/course/${courseId}/compression?tab=finals`);
   };
   const practiceModesRow1 = [
     { id: 'quick-recall', icon: Zap, title: 'Quick Recall', desc: 'Instant warmup', route: 'practice' },
@@ -89,72 +69,60 @@ export function CourseHome() {
   ];
 
   return (
-    <div className="min-h-screen bg-white">
-      {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-8 py-20">
-        {/* Course Header */}
-        <div className="mb-20">
-          <div className="text-sm text-[#6B7280] mb-3">{course.code}</div>
-          <h1 className="text-6xl mb-4 tracking-tight">{course.name}</h1>
-          {course.term && (
-            <div className="text-sm text-[#9CA3AF]">{course.term}</div>
-          )}
-        </div>
-
-        {/* Finals Readiness Section */}
-        <div className="grid grid-cols-3 gap-4 mb-12">
-          {/* Finals Readiness */}
-          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all duration-200 group">
-            <div className="w-10 h-10 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-3 group-hover:bg-[#EEF2FF] transition-colors">
-              <MasteryRing percentage={masteryPercentage} size="sm" showLabel={false} />
-            </div>
-            <h3 className="text-base mb-1">Finals Readiness</h3>
-            <p className="text-xs text-[#6B7280]">{masteryPercentage}%</p>
-          </div>
-
-          {/* Coverage */}
-          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all duration-200 group">
-            <div className="w-10 h-10 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-3 group-hover:bg-[#EEF2FF] transition-colors">
-              <TrendingUp className="w-5 h-5 text-[#4F46E5]" />
-            </div>
-            <h3 className="text-base mb-1">Coverage</h3>
-            <p className="text-xs text-[#6B7280]">{totalTopics} Topics</p>
-          </div>
-
-          {/* Focus Areas */}
-          <div className="bg-white border border-[#E5E7EB] rounded-[14px] p-6 text-left hover:border-[#4F46E5] transition-all duration-200 group">
-            <div className="w-10 h-10 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-3 group-hover:bg-[#EEF2FF] transition-colors">
-              <Target className="w-5 h-5 text-[#EF4444]" />
-            </div>
-            <h3 className="text-base mb-1">Focus Areas</h3>
-            <p className="text-xs text-[#6B7280]">{weakSpots} Weak Areas</p>
-          </div>
-        </div>
-
-        {/* Upload Materials Banner - Prominent */}
-        <div className="mb-20">
-          <button
-            onClick={() => setIsUploadModalOpen(true)}
-            className="w-full bg-gradient-to-br from-[#4F46E5] to-[#6366F1] hover:from-[#4338CA] hover:to-[#4F46E5] text-white rounded-[16px] p-10 text-left transition-all duration-300 shadow-lg hover:shadow-xl group relative overflow-hidden"
-          >
-            {/* Subtle gradient overlay */}
-            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+    <div className="min-h-screen bg-[#FAFAFA]">
+      {/* Course Hero Section with Upload Button */}
+      <div className="bg-white border-b border-[#E5E7EB]">
+        <div className="max-w-[1400px] mx-auto px-8 py-12">
+          <div className="flex items-center justify-between">
+            {/* Course Info - Left aligned for balance */}
+            <div className="flex-1" />
             
-            <div className="relative flex items-center gap-6">
-              <div className="w-16 h-16 rounded-[14px] bg-white/20 backdrop-blur-sm flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform duration-300">
-                <Upload className="w-8 h-8 text-white" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-2xl mb-2 tracking-tight">Upload Your Course Materials</h3>
-                <p className="text-white/90">Add lecture slides, notes, PDFs, and study guides to personalize your learning</p>
-              </div>
-              <div className="hidden md:flex items-center gap-2 text-white/80 text-sm">
-                <span>Get Started</span>
-                <ArrowLeft className="w-4 h-4 rotate-180" />
-              </div>
+            {/* Course Title - Centered */}
+            <div className="text-center">
+              <div className="text-sm text-[#6B7280] mb-2 tracking-wide uppercase font-medium">{course.code}</div>
+              <h1 className="text-5xl font-semibold tracking-tight mb-2 text-[#111827]">{course.name}</h1>
+              {course.term && (
+                <div className="text-sm text-[#9CA3AF]">{course.term}</div>
+              )}
             </div>
-          </button>
+            
+            {/* Upload Button - Right side */}
+            <div className="flex-1 flex justify-end">
+              <button
+                onClick={() => setIsUploadModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-[10px] transition-all duration-200 shadow-sm hover:shadow-md group"
+              >
+                <Upload className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                <span className="text-sm font-medium">Upload your course materials</span>
+              </button>
+            </div>
+          </div>
         </div>
+      </div>
+
+      {/* Dashboard Grid - Side by Side */}
+      <div className="max-w-[1400px] mx-auto px-8 py-10">
+        <div 
+          className="grid gap-6 transition-all duration-500"
+          style={{
+            gridTemplateColumns: isFinalsExpanded 
+              ? 'minmax(0, 7fr) minmax(0, 3fr)' 
+              : 'repeat(2, minmax(0, 1fr))'
+          }}
+        >
+          <FinalsSection
+            courseId={courseId!}
+            courseCode={course.code}
+            courseTitle={course.name}
+            isExpanded={isFinalsExpanded}
+            onExpandChange={setIsFinalsExpanded}
+          />
+          <TaskCompressorCard courseId={courseId!} isCompact={isFinalsExpanded} />
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <main className="max-w-[1400px] mx-auto px-8 pb-20">
 
         {/* Mode Selector & Main CTA Section */}
         <div className="mb-24">
@@ -247,7 +215,17 @@ export function CourseHome() {
         <div className="mb-12">
           <h2 className="text-3xl mb-3">Resources</h2>
           <p className="text-[#6B7280] mb-10">Your study materials</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <button
+              onClick={() => navigate(`/course/${courseId}/finals/pack`)}
+              className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
+            >
+              <div className="w-12 h-12 rounded-[12px] bg-[#FEF3C7] flex items-center justify-center mb-4 group-hover:bg-[#FDE68A] transition-colors">
+                <GraduationCap className="w-6 h-6 text-[#D97706]" />
+              </div>
+              <h3 className="text-lg mb-2">Final Pack</h3>
+              <p className="text-sm text-[#6B7280]">Essentials, drills & must-solve</p>
+            </button>
             <button
               onClick={handleViewCheatsheet}
               className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
@@ -259,14 +237,14 @@ export function CourseHome() {
               <p className="text-sm text-[#6B7280]">Your compressed reference</p>
             </button>
             <button
-              onClick={handleViewNotes}
+              onClick={() => navigate(`/course/${courseId}/finals/upload`)}
               className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
             >
-              <div className="w-12 h-12 rounded-[12px] bg-[#F5F3FF] flex items-center justify-center mb-4 group-hover:bg-[#EEF2FF] transition-colors">
-                <BookOpen className="w-6 h-6 text-[#4F46E5]" />
+              <div className="w-12 h-12 rounded-[12px] bg-[#DCFCE7] flex items-center justify-center mb-4 group-hover:bg-[#BBF7D0] transition-colors">
+                <FileText className="w-6 h-6 text-[#16A34A]" />
               </div>
-              <h3 className="text-lg mb-2">Notes & Diagrams</h3>
-              <p className="text-sm text-[#6B7280]">Visual summaries</p>
+              <h3 className="text-lg mb-2">Upload Graded Work</h3>
+              <p className="text-sm text-[#6B7280]">Analyze midterms & HWs</p>
             </button>
           </div>
         </div>

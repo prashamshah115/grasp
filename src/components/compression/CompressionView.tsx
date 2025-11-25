@@ -8,12 +8,13 @@
  * - Uses useTopics() hook for topics list (React Query)
  * - Uses useCompressionNotes() hook for notes (React Query)
  * - Uses useGenerateCompression() mutation to generate notes
+ * - Supports sidebar tabs: Topics | Finals Cheatsheet
  * - NO mock data, NO props
  */
 
-import { FileText, Sparkles, Upload, Download, FolderOpen, FileIcon } from 'lucide-react'
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { FileText, Sparkles, Upload, Download, FolderOpen, FileIcon, Book, GraduationCap } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useCourse, useTopics, useCompressionNotes, useGenerateCompression } from '@/hooks'
 import { useAuth } from '@/components/auth/AuthProvider'
 import LoadingScreen from '../LoadingScreen'
@@ -24,8 +25,11 @@ import { PDFViewerModal } from '../shared/PDFViewer'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 
+type SidebarTab = 'topics' | 'finals'
+
 export function CompressionView() {
   const { courseId } = useParams<{ courseId: string }>()
+  const [searchParams] = useSearchParams()
   const { user, isLoading: authLoading } = useAuth()
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null)
   const [uploadModalOpen, setUploadModalOpen] = useState(false)
@@ -36,6 +40,19 @@ export function CompressionView() {
     title: string
     page?: number
   } | null>(null)
+  
+  // Sidebar tab state - read from URL param
+  const tabFromUrl = searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState<SidebarTab>(
+    tabFromUrl === 'finals' ? 'finals' : 'topics'
+  )
+
+  // Update tab when URL param changes
+  useEffect(() => {
+    if (tabFromUrl === 'finals') {
+      setActiveTab('finals')
+    }
+  }, [tabFromUrl])
 
   // Fetch course and topics - all hooks called unconditionally
   const { data: course, isLoading: courseLoading } = useCourse(courseId!)
@@ -69,7 +86,7 @@ export function CompressionView() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('compression_notes')
-        .select('topic_id')
+        .select('topic_id, content_md')
         .eq('user_id', user!.id)
         .in('topic_id', topics?.map(t => t.id) || [])
 
@@ -78,6 +95,20 @@ export function CompressionView() {
     },
     enabled: !!user?.id && !!topics && topics.length > 0,
   })
+
+  // Aggregate all compression notes for Finals Cheatsheet
+  const finalsCheatsheet = useMemo(() => {
+    if (!allNotes || !topics) return null
+    
+    const notesWithTopics = allNotes
+      .map(note => {
+        const topic = topics.find(t => t.id === note.topic_id)
+        return topic ? { topic, content: note.content_md } : null
+      })
+      .filter(Boolean) as Array<{ topic: { id: string; name: string }; content: string }>
+    
+    return notesWithTopics.length > 0 ? notesWithTopics : null
+  }, [allNotes, topics])
 
   // Generate compression mutation
   const generateCompression = useGenerateCompression()
@@ -98,6 +129,7 @@ export function CompressionView() {
   }
 
   const selectedTopic = topics?.find((t) => t.id === selectedTopicId)
+  const topicsWithNotes = allNotes?.filter(n => n.topic_id).length || 0
 
   const handleGenerate = async () => {
     if (!selectedTopicId || !user?.id) {
@@ -155,6 +187,28 @@ export function CompressionView() {
     URL.revokeObjectURL(url)
   }
 
+  const handleDownloadFinalsCheatsheet = () => {
+    if (!finalsCheatsheet) return
+
+    // Create markdown content with all topics
+    const content = `# Finals Cheatsheet - ${course.name} (${course.code})\n\n` +
+      `Generated: ${new Date().toLocaleDateString()}\n\n---\n\n` +
+      finalsCheatsheet.map(item => 
+        `## ${item.topic.name}\n\n${item.content}\n\n---\n`
+      ).join('\n')
+
+    // Create blob and download
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${course.code}-finals-cheatsheet.md`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   const handleOpenPdf = async (documentId: string, title: string, page?: number) => {
     // Get public URL for document
     const doc = topicDocuments?.find(d => d.id === documentId)
@@ -174,13 +228,13 @@ export function CompressionView() {
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* Topics List - Left Pane */}
+      {/* Sidebar - Left Pane */}
       <div className="w-80 border-r border-[#E5E7EB] bg-[#FAFAFA] overflow-y-auto">
         <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
+          {/* Course Info & Actions */}
+          <div className="flex items-center justify-between mb-4">
             <div>
               <div className="text-sm text-[#9CA3AF] mb-1">{course.code}</div>
-              <h2 className="text-xl font-medium">Topics</h2>
             </div>
             <div className="flex gap-2">
               <button
@@ -192,7 +246,7 @@ export function CompressionView() {
               </button>
               <button
                 onClick={() => setUploadModalOpen(true)}
-                disabled={!selectedTopicId}
+                disabled={!selectedTopicId && activeTab !== 'finals'}
                 className="p-2 hover:bg-white rounded-[8px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title={selectedTopicId ? "Upload PDF" : "Select a topic first"}
               >
@@ -201,9 +255,44 @@ export function CompressionView() {
             </div>
           </div>
 
+          {/* Tab Selector */}
+          <div className="mb-6">
+            <div className="inline-flex w-full bg-white border border-[#E5E7EB] p-1 rounded-[10px]">
+              <button
+                onClick={() => {
+                  setActiveTab('topics')
+                  setSelectedTopicId(null)
+                }}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[8px] text-sm transition-all duration-200 ${
+                  activeTab === 'topics'
+                    ? 'bg-[#4F46E5] text-white shadow-sm'
+                    : 'text-[#6B7280] hover:text-[#111827]'
+                }`}
+              >
+                <Book className="w-4 h-4" />
+                Topics
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab('finals')
+                  setSelectedTopicId(null)
+                }}
+                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-[8px] text-sm transition-all duration-200 ${
+                  activeTab === 'finals'
+                    ? 'bg-[#4F46E5] text-white shadow-sm'
+                    : 'text-[#6B7280] hover:text-[#111827]'
+                }`}
+              >
+                <GraduationCap className="w-4 h-4" />
+                Finals
+              </button>
+            </div>
+          </div>
+
           {showFileManager ? (
             <FileManagement />
-          ) : (
+          ) : activeTab === 'topics' ? (
+            // Topics List
             <div className="space-y-2">
               {topics?.map((topic) => {
                 // Check if this topic has compression notes
@@ -232,13 +321,140 @@ export function CompressionView() {
                 )
               })}
             </div>
+          ) : (
+            // Finals Cheatsheet Sidebar
+            <div className="space-y-4">
+              {/* Summary Card */}
+              <div className="p-4 bg-white border border-[#E5E7EB] rounded-[12px]">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 rounded-[10px] bg-gradient-to-br from-[#FEF3C7] to-[#FDE68A] flex items-center justify-center">
+                    <GraduationCap className="w-5 h-5 text-[#D97706]" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium">Finals Cheatsheet</h4>
+                    <p className="text-xs text-[#9CA3AF]">Aggregated notes</p>
+                  </div>
+                </div>
+                <div className="text-xs text-[#6B7280]">
+                  {topicsWithNotes} of {topics?.length || 0} topics covered
+                </div>
+                {topicsWithNotes > 0 && (
+                  <div className="mt-3 h-1.5 bg-[#F3F4F6] rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-[#10B981] rounded-full transition-all"
+                      style={{ width: `${(topicsWithNotes / (topics?.length || 1)) * 100}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Topics with notes */}
+              {finalsCheatsheet && (
+                <div className="space-y-2">
+                  <p className="text-xs text-[#9CA3AF] px-1">Included topics:</p>
+                  {finalsCheatsheet.map((item) => (
+                    <div
+                      key={item.topic.id}
+                      className="p-3 bg-white border border-transparent hover:border-[#E5E7EB] rounded-[10px] transition-all"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-[#10B981]" />
+                        <span className="text-sm">{item.topic.name}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Topics without notes */}
+              {topics && topics.length > topicsWithNotes && (
+                <div className="space-y-2">
+                  <p className="text-xs text-[#9CA3AF] px-1">Missing topics:</p>
+                  {topics
+                    .filter(t => !allNotes?.some(n => n.topic_id === t.id))
+                    .map((topic) => (
+                      <button
+                        key={topic.id}
+                        onClick={() => {
+                          setActiveTab('topics')
+                          setSelectedTopicId(topic.id)
+                        }}
+                        className="w-full p-3 bg-white border border-dashed border-[#E5E7EB] hover:border-[#4F46E5] rounded-[10px] transition-all text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-[#D1D5DB]" />
+                          <span className="text-sm text-[#6B7280]">{topic.name}</span>
+                        </div>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
 
-      {/* Notes Viewer - Right Pane */}
+      {/* Main Content - Right Pane */}
       <div className="flex-1 overflow-y-auto bg-white">
-        {selectedTopicId && selectedTopic ? (
+        {activeTab === 'finals' ? (
+          // Finals Cheatsheet View
+          <div className="max-w-3xl mx-auto px-8 py-12">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <div className="text-sm text-[#9CA3AF] mb-2">
+                  AI-Aggregated Cheatsheet
+                </div>
+                <h1 className="text-4xl tracking-tight">Finals Cheatsheet</h1>
+              </div>
+              <button
+                onClick={handleDownloadFinalsCheatsheet}
+                disabled={!finalsCheatsheet}
+                className="flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#10B981] text-white hover:bg-[#059669] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Download className="w-4 h-4" />
+                <span className="text-sm">Download All</span>
+              </button>
+            </div>
+
+            {finalsCheatsheet && finalsCheatsheet.length > 0 ? (
+              <div className="space-y-8">
+                {finalsCheatsheet.map((item, index) => (
+                  <div key={item.topic.id} className="pb-8 border-b border-[#E5E7EB] last:border-0">
+                    <div className="flex items-center gap-3 mb-4">
+                      <span className="flex items-center justify-center w-7 h-7 rounded-full bg-[#F5F3FF] text-sm text-[#4F46E5] font-medium">
+                        {index + 1}
+                      </span>
+                      <h2 className="text-2xl tracking-tight">{item.topic.name}</h2>
+                    </div>
+                    <div className="prose prose-lg max-w-none">
+                      <div className="whitespace-pre-wrap text-[#374151] leading-relaxed">
+                        {item.content}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              // Empty state for Finals Cheatsheet
+              <div className="text-center py-12">
+                <div className="w-16 h-16 rounded-[16px] bg-[#FEF3C7] flex items-center justify-center mx-auto mb-4">
+                  <GraduationCap className="w-8 h-8 text-[#D97706]" />
+                </div>
+                <h3 className="text-2xl mb-2">No Cheatsheet Yet</h3>
+                <p className="text-[#6B7280] mb-6 max-w-md mx-auto">
+                  Generate compression notes for your topics first. They'll automatically appear here as your Finals Cheatsheet.
+                </p>
+                <button
+                  onClick={() => setActiveTab('topics')}
+                  className="px-6 py-3 bg-[#4F46E5] text-white rounded-[12px] hover:bg-[#4338CA] transition-all"
+                >
+                  Go to Topics
+                </button>
+              </div>
+            )}
+          </div>
+        ) : selectedTopicId && selectedTopic ? (
           <div className="max-w-3xl mx-auto px-8 py-12">
             {/* Header */}
             <div className="flex items-center justify-between mb-8">
