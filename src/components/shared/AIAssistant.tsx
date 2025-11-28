@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Minimize2, Maximize2, Loader2, MessageSquare, RotateCcw } from 'lucide-react';
+import { Sparkles, X, Send, Minimize2, Maximize2, Loader2, MessageSquare, RotateCcw, Globe, Globe2 } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useChat } from '@/hooks/useChat';
+import { useWebSearch } from '@/hooks/useWebSearch';
 import type { UIMessage, ChatCitation } from '@/types/chat';
 
 interface AIAssistantProps {
@@ -46,7 +47,11 @@ export function AIAssistant({
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Web search hook
+  const webSearch = useWebSearch();
 
   // Context-aware initial greeting
   const getInitialGreeting = () => {
@@ -142,8 +147,24 @@ export function AIAssistant({
   const handleSend = async () => {
     if (!inputValue.trim() || !user || isSending) return;
 
-    const messageText = inputValue;
+    let messageText = inputValue;
     setInputValue('');
+    
+    // If web search is enabled, perform search and prepend context
+    if (webSearchEnabled) {
+      try {
+        const searchResults = await webSearch.mutateAsync(inputValue);
+        if (searchResults.results && searchResults.results.length > 0) {
+          // Prepend web search context to the message
+          const webContext = searchResults.results.slice(0, 3).map(r => 
+            `[${r.title}]: ${r.snippet}`
+          ).join('\n\n');
+          messageText = `[Web Search Context]\n${webContext}\n\n[User Question]\n${inputValue}`;
+        }
+      } catch (error) {
+        console.warn('Web search failed, continuing without web context:', error);
+      }
+    }
     
     await sendMessage(messageText);
   };
@@ -248,14 +269,29 @@ export function AIAssistant({
           <div>
             <h3 className="font-medium text-white">AI Assistant</h3>
             <div className="flex items-center gap-1.5">
-              <div className={`w-2 h-2 rounded-full ${isLoading ? 'bg-yellow-400 animate-pulse' : 'bg-[#10B981]'}`}></div>
+              <div className={`w-2 h-2 rounded-full ${isLoading || webSearch.isPending ? 'bg-yellow-400 animate-pulse' : 'bg-[#10B981]'}`}></div>
               <span className="text-xs text-white/80">
-                {isLoading ? 'Loading...' : isSending ? 'Thinking...' : 'Ready to help'}
+                {webSearch.isPending ? 'Searching web...' : isLoading ? 'Loading...' : isSending ? 'Thinking...' : webSearchEnabled ? 'Web search ON' : 'Ready to help'}
               </span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+            className={`p-2 rounded-[8px] transition-colors ${
+              webSearchEnabled 
+                ? 'bg-white/20 text-white' 
+                : 'hover:bg-white/10 text-white/70'
+            }`}
+            title={webSearchEnabled ? 'Web search enabled' : 'Enable web search'}
+          >
+            {webSearchEnabled ? (
+              <Globe className="w-4 h-4" />
+            ) : (
+              <Globe2 className="w-4 h-4" />
+            )}
+          </button>
           {chatMessages.length > 0 && (
             <button
               onClick={handleClearChat}

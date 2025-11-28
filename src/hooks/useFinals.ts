@@ -6,6 +6,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { triggerFinalPackGeneration } from '@/lib/api';
 
 // Types
 export interface FinalsDashboardData {
@@ -203,6 +204,22 @@ export function useFinalPack(courseId: string | undefined, tier: 'essentials' | 
     },
     enabled: !!courseId,
     staleTime: 1000 * 60 * 30,
+  });
+}
+
+/**
+ * Trigger final pack generation via Trigger.dev
+ */
+export function useTriggerFinalPacks() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (courseId: string) => triggerFinalPackGeneration(courseId),
+    onSuccess: (_, courseId) => {
+      // Invalidate final packs queries after triggering generation
+      queryClient.invalidateQueries({ queryKey: ['final-packs', courseId] });
+      queryClient.invalidateQueries({ queryKey: ['final-pack', courseId] });
+    },
   });
 }
 

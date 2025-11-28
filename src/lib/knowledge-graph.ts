@@ -198,3 +198,4 @@ export async function getTopicImportance(
   return importance;
 }
 
+

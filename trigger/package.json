@@ -8,12 +8,14 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "@trigger.dev/python": "^4.1.1",
-    "@trigger.dev/sdk": "^4.0.0"
+    "@trigger.dev/python": "^4.1.2",
+    "@trigger.dev/sdk": "^4.1.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/pdf-parse": "^1.1.4",
+    "dotenv": "^17.2.3",
+    "trigger.dev": "^4.1.2",
     "typescript": "^5.0.0"
   }
 }

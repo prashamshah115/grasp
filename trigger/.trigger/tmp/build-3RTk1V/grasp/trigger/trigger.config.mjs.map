@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../../../../trigger.config.ts"],
+  "sourcesContent": ["import { defineConfig } from \"@trigger.dev/sdk\";\nimport { pythonExtension } from \"@trigger.dev/python/extension\";\nimport { syncEnvVars } from \"@trigger.dev/build/extensions/core\";\n\nexport default defineConfig({\n  // 🔥 REQUIRED — replace with your actual Trigger.dev project ID\n  project: \"proj_gvongxitjrhgfakcmidx\",\n\n  runtime: \"node\",\n  logLevel: \"info\",\n  maxDuration: 1500, // 25 minutes\n\n  retries: {\n    enabledInDev: true,\n    default: {\n      maxAttempts: 3,\n      minTimeoutInMs: 1000,\n      maxTimeoutInMs: 10000,\n      factor: 2,\n      randomize: true,\n    },\n  },\n\n  // 🔥 Directory for your tasks (relative to config file location)\n  dirs: [\"./tasks\"],\n\n  // 🔥 Python extension — REQUIRED for:\n  // - pymupdf4llm PDF → markdown\n  // - BGE embeddings (sentence-transformers)\n  build: {},\n});\nexport const resolveEnvVars = undefined;"],
+  "mappings": ";;;;;;;;;;AAAA;AAIA,IAAO,yBAAQ,aAAa;AAAA;AAAA,EAE1B,SAAS;AAAA,EAET,SAAS;AAAA,EACT,UAAU;AAAA,EACV,aAAa;AAAA;AAAA,EAEb,SAAS;AAAA,IACP,cAAc;AAAA,IACd,SAAS;AAAA,MACP,aAAa;AAAA,MACb,gBAAgB;AAAA,MAChB,gBAAgB;AAAA,MAChB,QAAQ;AAAA,MACR,WAAW;AAAA,IACb;AAAA,EACF;AAAA;AAAA,EAGA,MAAM,CAAC,SAAS;AAAA;AAAA;AAAA;AAAA,EAKhB,OAAO,CAAC;AACV,CAAC;AACM,IAAM,iBAAiB;",
+  "names": []
+}

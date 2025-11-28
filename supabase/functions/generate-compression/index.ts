@@ -20,7 +20,7 @@ interface CompressionResponse {
   sourceCount: number
 }
 
-// Helper: Call OpenAI LLM
+// Helper: Call OpenAI LLM (GPT-5 Nano - Nov 2025, 200x cheaper than GPT-4 Turbo)
 async function callLLM(systemPrompt: string, userMessage: string): Promise<string> {
   const apiKey = Deno.env.get('OPENAI_API_KEY')
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
@@ -32,7 +32,7 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'gpt-4-turbo-preview',
+      model: 'gpt-5-nano',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
@@ -267,89 +267,127 @@ serve(async (req) => {
     console.log(`[${FUNCTION_NAME}] Aggregated ${content.length} chars from ${contentParts.length} pages (out of ${pages.length} total)`)
 
     // STEP 4: Build enhanced LLM system prompt for high-quality compression
-    const systemPrompt = `You are an expert educational content creator specializing in creating comprehensive, exam-optimized study notes for university-level courses. Your task is to transform dense course materials into clear, structured, and actionable compression notes.
+    const systemPrompt = `You are an expert university-level content compression engine. Your job is to convert dense academic material into clean, exam-optimized **Markdown** notes without adding facts not found in the source.
 
-QUALITY STANDARDS:
-1. **Comprehensiveness**: Cover all critical concepts, not just surface-level facts
-2. **Clarity**: Explain concepts from the ground up - assume the reader is learning, not reviewing
-3. **Structure**: Organize information logically with clear hierarchies
-4. **Actionability**: Include practical applications, examples, and common pitfalls
-5. **Exam Focus**: Prioritize information likely to appear on exams while maintaining educational value
+## OUTPUT REQUIREMENTS
 
-CONTENT REQUIREMENTS:
-- **Foundational Concepts**: Start with core definitions and principles before advanced topics
-- **Step-by-Step Explanations**: Break down complex processes into clear steps
-- **Visual Descriptions**: Describe diagrams, algorithms, or processes in text format
-- **Connections**: Show relationships between concepts
-- **Common Mistakes**: Highlight frequent errors or misconceptions
-- **Memory Aids**: Include mnemonics or patterns when helpful
+- Output **high-quality Markdown only**.
+- Use clear section headers (##, ###).
+- Use **bold** for key terms.
+- Use bullet points for concepts, numbered lists for steps.
+- Use fenced code blocks \`\`\` for formulas or pseudocode.
+- No intro, no outro, no fluff — begin immediately with headers.
 
-TOPIC QUESTIONS (for context on what students need to know):
+## QUALITY PRINCIPLES
+
+1. **Accuracy First**
+   - No invented info. Stay strictly within the provided source content.
+   - If the source is ambiguous, summarize conservatively.
+
+2. **Compression Without Loss**
+   - Extract the *full conceptual structure* of the topic.
+   - Prioritize depth over breadth: explain the idea, the intuition, the mechanics.
+
+3. **Teach From Zero**
+   - Assume the student is learning for the first time.
+   - Define all key terms before using them.
+
+4. **Exam Optimization**
+   - Highlight high-yield facts, common mistakes, edge cases.
+   - Prefer clarity over density.
+
+## REQUIRED SECTIONS (in order)
+
+Always output sections in the exact order listed. Never skip or rename a section.
+
+### 1. Core Definitions (3–5 bullets)
+- Essential terminology
+- First-principles explanations
+
+### 2. Key Concepts & Principles (5–8 bullets)
+- Theories, rules, relationships
+- Intuition & purpose
+
+### 3. Processes / Algorithms (3–5 items)
+- Step-by-step numbered lists
+- Pseudocode if relevant
+- Logic / decision criteria
+
+### 4. Formulas (2–4 items)
+Use code blocks:
+\`\`\`
+Formula: F = ma
+Variables:
+* F = Force
+* m = Mass
+* a = Acceleration
+\`\`\`
+Explain when/how each formula applies.
+
+### 5. Practical Applications (2–3 bullets)
+- Real-world uses
+- Problem-solving strategies
+
+### 6. Pitfalls & Edge Cases (2–3 bullets)
+- Common errors students make
+- Exceptions / tricky variants
+
+### 7. Exam-Critical Facts (2–3 bullets)
+- High-probability test points
+- Must-memorize distinctions
+
+## STRICT RULES
+
+- Do NOT introduce external facts. Only compress what's in the source.
+- If the source lacks enough detail, be concise rather than inventing content.
+- If formulas are not present, do not create them.
+- Each bullet point must represent one idea only.
+
+## FINAL INSTRUCTION
+
+Return only the Markdown notes. Do not mention the prompt.
+Use the question list and source content below as your entire knowledge base.
+
+TOPIC QUESTIONS:
+
 ${questionList}
 
 SOURCE MATERIAL:
-${content}
 
-TASK:
-Generate comprehensive compression notes (15-25 bullet points) that include:
-
-1. **Core Definitions** (3-5 points)
-   - Essential terminology with clear explanations
-   - Fundamental concepts explained from first principles
-
-2. **Key Concepts & Principles** (5-8 points)
-   - Important theories, frameworks, or models
-   - How concepts relate to each other
-   - Underlying principles that govern the topic
-
-3. **Processes & Algorithms** (3-5 points)
-   - Step-by-step procedures
-   - Algorithm descriptions with clear logic flow
-   - Decision trees or flowcharts described in text
-
-4. **Formulas & Equations** (2-4 points)
-   - Key formulas with variable explanations
-   - When and how to apply each formula
-   - Formula derivations or intuitions when helpful
-
-5. **Practical Applications** (2-3 points)
-   - Real-world examples
-   - Use cases and scenarios
-   - Problem-solving strategies
-
-6. **Common Pitfalls & Edge Cases** (2-3 points)
-   - Frequent mistakes students make
-   - Exceptions to general rules
-   - Tricky edge cases to watch for
-
-7. **Exam-Critical Facts** (2-3 points)
-   - High-probability exam topics
-   - Quick reference facts
-   - Comparison tables or distinctions
-
-FORMATTING GUIDELINES:
-- Use Markdown formatting with clear hierarchy
-- Use **bold** for key terms and important concepts
-- Use code blocks for formulas, code snippets, or technical notation
-- Use numbered lists for sequential processes
-- Use bullet points for parallel concepts
-- Include section headers (##) to organize content
-- No introductory or concluding paragraphs - dive straight into content
-- Each bullet should be self-contained but build on previous points
-
-QUALITY CHECK:
-Before finalizing, ensure:
-✓ All major concepts from source materials are covered
-✓ Explanations are clear enough for someone learning the topic
-✓ Information is accurate and grounded in source materials
-✓ Formatting enhances readability
-✓ Content is exam-relevant without sacrificing educational depth
-
-Generate the compression notes now:`
+${content}`
 
     // STEP 5: Generate via LLM
     console.log('[generate-compression] Calling LLM…')
+    const llmStartTime = Date.now()
     const compressionContent = await callLLM(systemPrompt, 'Generate the compression notes.')
+    const llmDuration = Date.now() - llmStartTime
+
+    // Track LLM usage (non-blocking)
+    try {
+      const inputTokens = Math.ceil(systemPrompt.length / 4) // Rough estimate
+      const outputTokens = Math.ceil(compressionContent.length / 4)
+      const costEstimate = (inputTokens * 0.01 + outputTokens * 0.03) / 1000 // GPT-4 Turbo pricing
+      
+      await supabase
+        .from('llm_usage')
+        .insert({
+          user_id: user.id,
+          feature: 'compression_notes',
+          model: 'gpt-4-turbo-preview',
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          cost_estimate: costEstimate,
+          metadata: {
+            topicId,
+            courseId,
+            sourcePages: pages.length,
+            duration_ms: llmDuration,
+          },
+        })
+      console.log('[generate-compression] LLM usage tracked')
+    } catch (usageError) {
+      console.warn('[generate-compression] Failed to track LLM usage (non-critical):', usageError)
+    }
 
     // STEP 6: Save to DB
     const { error: saveError } = await supabase

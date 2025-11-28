@@ -130,7 +130,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             password,
             options: {
               data: { full_name: name },
-              emailRedirectTo: `${window.location.origin}/auth/callback`,
+              emailRedirectTo: `${window.location.origin}`,
             },
           })
           if (error) throw error
@@ -163,7 +163,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       type: 'signup',
       email: pendingEmail,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${window.location.origin}`,
       },
     })
     

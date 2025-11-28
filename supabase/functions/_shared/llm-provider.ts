@@ -210,7 +210,10 @@ export class GeminiProvider implements LLMProvider {
 // ============================================
 
 export type SupportedModel = 
-  // OpenAI models
+  // OpenAI models (Nov 2025)
+  | 'gpt-5-nano'        // Latest: 200x cheaper than GPT-4 Turbo
+  | 'gpt-5-mini'
+  | 'gpt-5'
   | 'gpt-4-turbo-preview'
   | 'gpt-4-turbo'
   | 'gpt-4o'
@@ -223,7 +226,11 @@ export type SupportedModel =
   | 'gemini-1.0-pro';
 
 const MODEL_TO_PROVIDER: Record<string, 'openai' | 'gemini'> = {
-  // OpenAI
+  // OpenAI GPT-5 Series (Nov 2025)
+  'gpt-5-nano': 'openai',    // Best value: $0.05/1M input, $0.40/1M output
+  'gpt-5-mini': 'openai',
+  'gpt-5': 'openai',
+  // OpenAI GPT-4 Series (Legacy)
   'gpt-4-turbo-preview': 'openai',
   'gpt-4-turbo': 'openai',
   'gpt-4o': 'openai',
@@ -286,7 +293,7 @@ export async function callLLM(
   userMessage: string,
   options: Partial<LLMOptions> & { model?: string } = {}
 ): Promise<LLMResponse> {
-  const model = options.model || 'gpt-4-turbo-preview';
+  const model = options.model || 'gpt-5-nano';
   const provider = createProvider(model);
   
   const messages: LLMMessage[] = [
@@ -310,7 +317,7 @@ export async function callLLMWithHistory(
   userMessage: string,
   options: Partial<LLMOptions> & { model?: string } = {}
 ): Promise<LLMResponse> {
-  const model = options.model || 'gpt-4-turbo-preview';
+  const model = options.model || 'gpt-5-nano';
   const provider = createProvider(model);
   
   const messages: LLMMessage[] = [
@@ -330,9 +337,9 @@ export async function callLLMWithHistory(
 }
 
 // ============================================
-// DEFAULT MODEL CONSTANTS
+// DEFAULT MODEL CONSTANTS (Nov 2025)
 // ============================================
 
-export const DEFAULT_MODEL = 'gpt-4-turbo-preview';
+export const DEFAULT_MODEL = 'gpt-5-nano';  // Best value: $0.05/1M input, $0.40/1M output
 export const FALLBACK_MODEL = 'gemini-1.5-flash';
 

@@ -20,8 +20,9 @@ import {
   ExternalLink, 
   ChevronRight 
 } from 'lucide-react';
-import { useFinalPacks, useMustSolveTopics } from '@/hooks/useFinals';
+import { useFinalPacks, useMustSolveTopics, useTriggerFinalPacks } from '@/hooks/useFinals';
 import LoadingScreen from '@/components/LoadingScreen';
+import { RefreshCw, Loader2 } from 'lucide-react';
 
 interface FinalPackViewProps {
   courseId: string;
@@ -61,10 +62,22 @@ export function FinalPackView({ courseId, courseCode, onStartPractice }: FinalPa
   const [activeTab, setActiveTab] = useState<TabType>('essentials');
 
   // Fetch data from real hooks
-  const { data: packs, isLoading: packsLoading } = useFinalPacks(courseId);
+  const { data: packs, isLoading: packsLoading, refetch: refetchPacks } = useFinalPacks(courseId);
   const { data: mustSolveData, isLoading: mustSolveLoading } = useMustSolveTopics(courseId);
+  const triggerFinalPacks = useTriggerFinalPacks();
 
   const isLoading = packsLoading || mustSolveLoading;
+  const hasNoPacks = !packs || packs.length === 0;
+
+  const handleGeneratePacks = async () => {
+    try {
+      await triggerFinalPacks.mutateAsync(courseId);
+      // Refetch after a delay to check for new packs
+      setTimeout(() => refetchPacks(), 5000);
+    } catch (error) {
+      console.error('Failed to trigger final pack generation:', error);
+    }
+  };
 
   // Extract essentials and drills from packs
   const essentialsPack = packs?.find(p => p.tier === 'essentials');
@@ -193,8 +206,22 @@ export function FinalPackView({ courseId, courseCode, onStartPractice }: FinalPa
                   ))}
                 </div>
               ) : (
-                <div className="p-6 bg-[#F9FAFB] rounded-[12px] border border-[#E5E7EB] text-center text-[#6B7280]">
-                  No formulas available yet. Upload course materials to generate.
+                <div className="p-6 bg-[#F9FAFB] rounded-[12px] border border-[#E5E7EB] text-center">
+                  <p className="text-[#6B7280] mb-4">No formulas available yet. Upload course materials to generate.</p>
+                  {hasNoPacks && (
+                    <button
+                      onClick={handleGeneratePacks}
+                      disabled={triggerFinalPacks.isPending}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-[#4F46E5] text-white rounded-lg hover:bg-[#4338CA] transition-colors disabled:opacity-50"
+                    >
+                      {triggerFinalPacks.isPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                      Generate Study Materials
+                    </button>
+                  )}
                 </div>
               )}
             </div>

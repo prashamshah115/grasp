@@ -1139,6 +1139,245 @@ export async function uploadCourseMaterial(file: File, courseId: string) {
   return upload || { id: document.id, storage_path: path, original_filename: file.name }
 }
 
+// ==================== RELEVANT CONTENT ====================
+
+export interface RelevantContentChunk {
+  id: string
+  content: string
+  doc_title: string
+  page_number: number
+  doc_type: string
+  similarity: number
+  document_id: string
+}
+
+export interface RelevantContentResponse {
+  chunks: RelevantContentChunk[]
+  total: number
+  source: 'vector' | 'topic' | 'none'
+}
+
+export interface GetRelevantContentRequest {
+  questionId?: string
+  questionText?: string
+  topicId?: string
+  courseId?: string
+}
+
+/**
+ * Fetch relevant course content for a question
+ * Uses vector search with topic-based fallback
+ */
+export async function getRelevantContent(
+  request: GetRelevantContentRequest
+): Promise<RelevantContentResponse> {
+  const user = await requireAuth()
+
+  return safeInvoke<RelevantContentResponse>(
+    'get-relevant-content',
+    {
+      body: {
+        questionId: request.questionId,
+        questionText: request.questionText,
+        topicId: request.topicId,
+        courseId: request.courseId,
+      },
+    }
+  )
+}
+
+// ==================== KNOWLEDGE GRAPH & OBJECTS ====================
+
+/**
+ * ✅ NEW: Fetch concepts for a course
+ */
+export async function fetchConcepts(courseId: string, topicId?: string) {
+  let query = supabase
+    .from('concepts')
+    .select('*')
+    .eq('course_id', courseId)
+    .order('title', { ascending: true })
+
+  if (topicId) {
+    query = query.eq('topic_id', topicId)
+  }
+
+  const { data, error } = await query
+
+  if (error) handleSupabaseError(error)
+  return data || []
+}
+
+/**
+ * ✅ NEW: Fetch formulas for a course or topic
+ */
+export async function fetchFormulas(courseId: string, topicId?: string) {
+  let query = supabase
+    .from('formulas')
+    .select('*, concepts(title)')
+    .eq('course_id', courseId)
+    .order('name', { ascending: true })
+
+  if (topicId) {
+    query = query.eq('topic_id', topicId)
+  }
+
+  const { data, error } = await query
+
+  if (error) handleSupabaseError(error)
+  return data || []
+}
+
+/**
+ * ✅ NEW: Fetch knowledge objects for a topic
+ */
+export async function fetchKnowledgeObjects(topicId: string) {
+  const { data, error } = await supabase
+    .from('knowledge_objects')
+    .select('*')
+    .eq('topic_id', topicId)
+    .order('object_type', { ascending: true })
+
+  if (error) handleSupabaseError(error)
+  return data || []
+}
+
+/**
+ * ✅ NEW: Fetch course knowledge graph (topic relationships)
+ */
+export async function fetchCourseGraph(courseId: string) {
+  const { data, error } = await supabase
+    .from('course_graph_edges')
+    .select(`
+      *,
+      topic_a_data:topics!course_graph_edges_topic_a_fkey(id, name, slug),
+      topic_b_data:topics!course_graph_edges_topic_b_fkey(id, name, slug)
+    `)
+    .eq('course_id', courseId)
+
+  if (error) handleSupabaseError(error)
+  return data || []
+}
+
+/**
+ * ✅ NEW: Fetch concept relationships
+ */
+export async function fetchConceptRelationships(courseId: string) {
+  // First get all concepts for this course
+  const { data: concepts, error: conceptsError } = await supabase
+    .from('concepts')
+    .select('id')
+    .eq('course_id', courseId)
+
+  if (conceptsError) handleSupabaseError(conceptsError)
+  
+  const conceptIds = concepts?.map(c => c.id) || []
+  if (conceptIds.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('concept_relationships')
+    .select(`
+      *,
+      concept:concepts!concept_relationships_concept_id_fkey(id, title),
+      related:concepts!concept_relationships_related_concept_id_fkey(id, title)
+    `)
+    .in('concept_id', conceptIds)
+
+  if (error) handleSupabaseError(error)
+  return data || []
+}
+
+// ==================== FINAL PACKS ====================
+
+/**
+ * ✅ NEW: Fetch all final packs for a course
+ */
+export async function fetchFinalPacks(courseId: string) {
+  const { data, error } = await supabase
+    .from('final_packs')
+    .select('*')
+    .eq('course_id', courseId)
+    .order('tier', { ascending: true })
+
+  if (error) handleSupabaseError(error)
+  return data || []
+}
+
+/**
+ * ✅ NEW: Fetch specific final pack tier
+ */
+export async function fetchFinalPack(courseId: string, tier: 'essentials' | 'must_solve' | 'drills') {
+  const { data, error } = await supabase
+    .from('final_packs')
+    .select('*')
+    .eq('course_id', courseId)
+    .eq('tier', tier)
+    .maybeSingle()
+
+  if (error && error.code !== 'PGRST116') {
+    handleSupabaseError(error)
+  }
+  return data
+}
+
+/**
+ * ✅ NEW: Trigger final pack generation via Trigger.dev
+ * This calls an edge function that triggers the Trigger.dev task
+ */
+export async function triggerFinalPackGeneration(courseId: string) {
+  const user = await requireAuth()
+
+  return safeInvoke(
+    'trigger-final-packs',
+    {
+      body: { course_id: courseId },
+    }
+  )
+}
+
+/**
+ * ✅ NEW: Trigger knowledge graph generation via Trigger.dev
+ */
+export async function triggerKnowledgeGraphGeneration(courseId: string) {
+  const user = await requireAuth()
+
+  return safeInvoke(
+    'trigger-knowledge-graph',
+    {
+      body: { course_id: courseId },
+    }
+  )
+}
+
+// ==================== WEB SEARCH ====================
+
+export interface WebSearchResult {
+  title: string
+  url: string
+  snippet: string
+  score?: number
+}
+
+export interface WebSearchResponse {
+  results: WebSearchResult[]
+  query: string
+}
+
+/**
+ * ✅ NEW: Search the web using Tavily API
+ * Used for RAG enhancement with real-time information
+ */
+export async function searchWeb(query: string): Promise<WebSearchResponse> {
+  const user = await requireAuth()
+
+  return safeInvoke<WebSearchResponse>(
+    'search-web',
+    {
+      body: { query },
+    }
+  )
+}
+
 // ==================== RE-EXPORT EXTENSIONS ====================
 // Phase 5: Additional API functions for complete backend coverage
 export {

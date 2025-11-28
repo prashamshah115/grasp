@@ -1,0 +1,255 @@
+{
+  "configPath": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/trigger.config.mjs",
+  "tasks": [
+    {
+      "id": "generate-knowledge-graph",
+      "queue": {
+        "concurrencyLimit": 1
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 10000,
+        "maxTimeoutInMs": 120000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/scheduled/daily-knowledge-graph.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/scheduled/daily-knowledge-graph.mjs"
+    },
+    {
+      "id": "daily-knowledge-graph-refresh",
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 1000,
+        "maxTimeoutInMs": 10000,
+        "randomize": true
+      },
+      "triggerSource": "schedule",
+      "schedule": {
+        "cron": "0 2 * * *",
+        "timezone": "UTC"
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/scheduled/daily-knowledge-graph.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/scheduled/daily-knowledge-graph.mjs"
+    },
+    {
+      "id": "update-rag-cache",
+      "queue": {
+        "concurrencyLimit": 2
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 5000,
+        "maxTimeoutInMs": 60000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/update-rag-cache.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/update-rag-cache.mjs"
+    },
+    {
+      "id": "generate-embeddings",
+      "queue": {
+        "concurrencyLimit": 5
+      },
+      "retry": {
+        "maxAttempts": 5,
+        "factor": 2,
+        "minTimeoutInMs": 5000,
+        "maxTimeoutInMs": 600000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/generate-embeddings.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/generate-embeddings.mjs"
+    },
+    {
+      "id": "generate-study-plan",
+      "queue": {
+        "concurrencyLimit": 5
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 5000,
+        "maxTimeoutInMs": 60000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/generate-study-plan.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/generate-study-plan.mjs"
+    },
+    {
+      "id": "precompute-final-packs",
+      "queue": {
+        "concurrencyLimit": 2
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 5000,
+        "maxTimeoutInMs": 120000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/index.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/index.mjs"
+    },
+    {
+      "id": "daily-final-packs-refresh",
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 1000,
+        "maxTimeoutInMs": 10000,
+        "randomize": true
+      },
+      "triggerSource": "schedule",
+      "schedule": {
+        "cron": "0 3 * * *",
+        "timezone": "UTC"
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/index.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/index.mjs"
+    },
+    {
+      "id": "precompute-knowledge-objects",
+      "queue": {
+        "concurrencyLimit": 1
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 5000,
+        "maxTimeoutInMs": 300000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/index.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/index.mjs"
+    },
+    {
+      "id": "embed-web-results",
+      "queue": {
+        "concurrencyLimit": 2
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 5000,
+        "maxTimeoutInMs": 120000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/index.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/index.mjs"
+    },
+    {
+      "id": "extract-questions",
+      "queue": {
+        "concurrencyLimit": 3
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 5000,
+        "maxTimeoutInMs": 120000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/index.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/index.mjs"
+    },
+    {
+      "id": "finalize-document",
+      "queue": {
+        "concurrencyLimit": 10
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 1000,
+        "maxTimeoutInMs": 30000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/index.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/index.mjs"
+    },
+    {
+      "id": "ingest-document",
+      "queue": {
+        "concurrencyLimit": 2
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "factor": 2,
+        "minTimeoutInMs": 10000,
+        "maxTimeoutInMs": 300000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/index.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/index.mjs"
+    },
+    {
+      "id": "batch-ingest-storage",
+      "queue": {
+        "concurrencyLimit": 1
+      },
+      "retry": {
+        "maxAttempts": 2,
+        "factor": 2,
+        "minTimeoutInMs": 30000,
+        "maxTimeoutInMs": 300000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/index.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/index.mjs"
+    },
+    {
+      "id": "embed-pdf-v2",
+      "queue": {
+        "concurrencyLimit": 3
+      },
+      "retry": {
+        "maxAttempts": 5,
+        "factor": 2,
+        "minTimeoutInMs": 10000,
+        "maxTimeoutInMs": 600000,
+        "randomize": true
+      },
+      "maxDuration": 1500,
+      "filePath": "tasks/index.ts",
+      "entryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/grasp/trigger/tasks/index.mjs"
+    }
+  ],
+  "queues": [],
+  "workerEntryPoint": "/Users/prashamshah/grasp/trigger/.trigger/tmp/build-26ehDr/.npm/_npx/008556e9bfa22a63/node_modules/trigger.dev/dist/esm/entryPoints/dev-run-worker.mjs",
+  "runtime": "node",
+  "runtimeVersion": "23.11.0",
+  "customConditions": [],
+  "timings": {
+    "tasks/scheduled/daily-knowledge-graph.ts": 10.602457999999956,
+    "tasks/update-rag-cache.ts": 1.8941249999999172,
+    "tasks/generate-embeddings.ts": 2.925999999999931,
+    "tasks/generate-knowledge-graph.ts": 1.3120830000000296,
+    "tasks/generate-study-plan.ts": 3.029790999999932,
+    "tasks/index.ts": 20.45454200000006,
+    "tasks/ingest-document.ts": 1.4699169999998958,
+    "tasks/precompute-final-packs.ts": 1.9146670000000086,
+    "tasks/precompute-knowledge-objects.ts": 0.7172079999999141,
+    "tasks/scheduled/daily-final-packs.ts": 1.1682080000000497,
+    "tasks/batch-ingest-storage.ts": 1.750291999999945,
+    "tasks/embed-pdf-v2.ts": 1.6235000000000355,
+    "tasks/embed-web-results.ts": 1.873625000000061,
+    "tasks/extract-questions.ts": 5.438458999999966,
+    "tasks/finalize-document.ts": 4.177167000000054
+  }
+}

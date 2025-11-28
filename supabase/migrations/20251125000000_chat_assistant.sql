@@ -254,3 +254,4 @@ COMMENT ON TABLE chat_threads IS 'Persistent chat threads for AI assistant conve
 COMMENT ON TABLE chat_messages IS 'Individual messages within chat threads';
 COMMENT ON TABLE chat_rag_contexts IS 'Audit trail of RAG context used for each assistant response';
 
+

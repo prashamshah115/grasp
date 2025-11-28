@@ -31,6 +31,9 @@ import { useUpdateMastery } from '@/hooks/useMastery'
 import { fetchSessionDetails } from '@/lib/api'
 import { PDFViewerModal } from '@/components/shared/PDFViewer'
 import { AIAssistant } from '@/components/shared/AIAssistant'
+import { RelevantContentButton } from '@/components/shared/RelevantContentButton'
+import { RelevantContentViewer } from '@/components/shared/RelevantContentViewer'
+import { useRelevantContent } from '@/hooks/useRelevantContent'
 import { supabase } from '@/lib/supabase'
 import type { Database } from '@/types/database'
 import type { SubmitAnswerResponse } from '@/types/api'
@@ -60,6 +63,7 @@ export function PracticeSession() {
     title: string
     page?: number
   } | null>(null)
+  const [showRelevantContent, setShowRelevantContent] = useState(false)
 
   // ==================== QUERIES ====================
 
@@ -88,6 +92,19 @@ export function PracticeSession() {
       return data
     },
     enabled: !!currentQuestion?.topic_id,
+  })
+
+  // Fetch relevant content for current question
+  const {
+    data: relevantContent,
+    isLoading: relevantContentLoading,
+    error: relevantContentError,
+  } = useRelevantContent({
+    questionId: currentQuestion?.id,
+    questionText: currentQuestion?.prompt,
+    topicId: currentQuestion?.topic_id,
+    courseId: session?.course_id,
+    enabled: showRelevantContent && !!currentQuestion,
   })
 
   // ==================== MUTATIONS ====================
@@ -624,6 +641,25 @@ export function PracticeSession() {
           onClose={() => setSelectedPdf(null)}
         />
       )}
+
+      {/* Relevant Content Button - Above AI Assistant */}
+      {session && currentQuestion && (
+        <RelevantContentButton
+          onClick={() => setShowRelevantContent(true)}
+          hasContent={!relevantContentLoading && (relevantContent?.total ?? 0) > 0}
+          isLoading={relevantContentLoading}
+        />
+      )}
+
+      {/* Relevant Content Viewer */}
+      <RelevantContentViewer
+        isOpen={showRelevantContent}
+        onClose={() => setShowRelevantContent(false)}
+        data={relevantContent}
+        isLoading={relevantContentLoading}
+        error={relevantContentError}
+        courseName={(session?.courses as any)?.name || 'Course Materials'}
+      />
 
       {/* AI Assistant - Always Available */}
       {session && currentQuestion && (

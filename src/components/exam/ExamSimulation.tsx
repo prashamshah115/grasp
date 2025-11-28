@@ -47,6 +47,9 @@ import { QuestionNavigator } from './QuestionNavigator'
 import { SubmitExamModal } from './SubmitExamModal'
 import { PDFViewerModal } from '../shared/PDFViewer'
 import { AIAssistant } from '../shared/AIAssistant'
+import { RelevantContentButton } from '../shared/RelevantContentButton'
+import { RelevantContentViewer } from '../shared/RelevantContentViewer'
+import { useRelevantContent } from '@/hooks/useRelevantContent'
 import { supabase } from '@/lib/supabase'
 import type { CreateExamSessionResponse } from '@/types/api'
 
@@ -76,6 +79,7 @@ export function ExamSimulation() {
     status: 'saving' | 'saved' | 'error'
   }>({ questionId: null, status: 'saved' })
   const [failedSaves, setFailedSaves] = useState<Set<string>>(new Set())
+  const [showRelevantContent, setShowRelevantContent] = useState(false)
 
   // ==================== QUERIES ====================
 
@@ -119,6 +123,19 @@ export function ExamSimulation() {
       return data
     },
     enabled: !!currentQuestion?.topic_id,
+  })
+
+  // Fetch relevant content for current question
+  const {
+    data: relevantContent,
+    isLoading: relevantContentLoading,
+    error: relevantContentError,
+  } = useRelevantContent({
+    questionId: currentQuestion?.id,
+    questionText: currentQuestion?.prompt,
+    topicId: currentQuestion?.topic_id,
+    courseId: session?.exam?.course_id,
+    enabled: showRelevantContent && !!currentQuestion,
   })
 
   // Load saved answers and flags from snapshot (faster resume)
@@ -853,6 +870,25 @@ export function ExamSimulation() {
           onClose={() => setSelectedPdf(null)}
         />
       )}
+
+      {/* Relevant Content Button - Above AI Assistant */}
+      {session && currentQuestion && (
+        <RelevantContentButton
+          onClick={() => setShowRelevantContent(true)}
+          hasContent={!relevantContentLoading && (relevantContent?.total ?? 0) > 0}
+          isLoading={relevantContentLoading}
+        />
+      )}
+
+      {/* Relevant Content Viewer */}
+      <RelevantContentViewer
+        isOpen={showRelevantContent}
+        onClose={() => setShowRelevantContent(false)}
+        data={relevantContent}
+        isLoading={relevantContentLoading}
+        error={relevantContentError}
+        courseName={session?.exam?.course_name || 'Course Materials'}
+      />
 
       {/* AI Assistant - Always Available */}
       {session && currentQuestion && (

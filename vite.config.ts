@@ -5,6 +5,7 @@
 
   export default defineConfig({
     plugins: [react()],
+    base: './', // REQUIRED for SPA asset paths on subroutes (prevents 404s on /course/123, etc.)
     optimizeDeps: {
       exclude: ['react-pdf'],
       include: ['warning'],
@@ -58,7 +59,9 @@
     },
     build: {
       target: 'esnext',
-      outDir: 'build',
+      outDir: 'dist', // Changed from 'build' to 'dist' for Vercel 2025 infrastructure
+      emptyOutDir: true, // Prevents stale build artifacts
+      sourcemap: false, // Disable sourcemaps in production (reduces bundle size)
       commonjsOptions: {
         include: [/warning/, /node_modules/],
         transformMixedEsModules: true,

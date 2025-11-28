@@ -175,7 +175,7 @@ async function generateBGEEmbedding(text: string): Promise<number[]> {
 }
 
 // ------------------------------------------
-// LLM HELPER — OpenAI GPT-4 Turbo
+// LLM HELPER — OpenAI GPT-5 Nano (Nov 2025 - 200x cheaper than GPT-4 Turbo)
 // ------------------------------------------
 async function callLLM(systemPrompt: string, userMessage: string): Promise<string> {
   const apiKey = Deno.env.get('OPENAI_API_KEY')
@@ -188,7 +188,7 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'gpt-4-turbo-preview',
+      model: 'gpt-5-nano',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
@@ -369,16 +369,66 @@ serve(async (req) => {
 
     console.log('[rag-chat] Found', pages?.length || 0, 'pages')
 
+    // ------------------------------------------
+    // STEP 2.5 — SEARCH EXTERNAL RESULTS (web content)
+    // ------------------------------------------
+    let externalResults: any[] = []
+    if (normalizedCourseId) {
+      try {
+        const { data: webResults, error: webError } = await supabase.rpc(
+          'search_external_results',
+          {
+            query_embedding: queryEmbedding,
+            filter_course_id: normalizedCourseId,
+            match_threshold: 0.5,
+            match_count: 5
+          }
+        )
+
+        if (!webError && webResults) {
+          externalResults = webResults
+          console.log('[rag-chat] Found', externalResults.length, 'external web results')
+        }
+      } catch (webErr) {
+        console.warn('[rag-chat] External search failed (continuing):', webErr)
+      }
+    }
+
+    // ------------------------------------------
+    // STEP 2.6 — FETCH KNOWLEDGE OBJECTS (concepts, formulas)
+    // ------------------------------------------
+    let knowledgeObjects: any[] = []
+    if (normalizedCourseId) {
+      try {
+        const { data: kos, error: koError } = await supabase
+          .from('knowledge_objects')
+          .select('title, object_type, summary, content')
+          .eq('course_id', normalizedCourseId)
+          .limit(10)
+
+        if (!koError && kos) {
+          knowledgeObjects = kos
+          console.log('[rag-chat] Found', knowledgeObjects.length, 'knowledge objects')
+        }
+      } catch (koErr) {
+        console.warn('[rag-chat] Knowledge objects fetch failed (continuing):', koErr)
+      }
+    }
+
     // No matching pages → log but continue to LLM call (LLM can use its knowledge)
     if (!pages || pages.length === 0) {
       console.log(`[rag-chat] No course materials found, will use LLM knowledge with course/question context`)
     }
 
     // ------------------------------------------
-    // STEP 3 — Build LLM context block
+    // STEP 3 — Build LLM context block (course materials + web + knowledge objects)
     // ------------------------------------------
     const hasMaterials = pages && pages.length > 0
-    const context = hasMaterials
+    const hasWebResults = externalResults && externalResults.length > 0
+    const hasKnowledgeObjects = knowledgeObjects && knowledgeObjects.length > 0
+    
+    // Course materials context
+    const courseContext = hasMaterials
       ? pages
           .map(
             (p: any, i: number) =>
@@ -386,6 +436,34 @@ serve(async (req) => {
           )
           .join('\n\n---\n\n')
       : ''
+
+    // External web sources context
+    const webContext = hasWebResults
+      ? externalResults
+          .map(
+            (r: any, i: number) =>
+              `[Web Source ${i + 1}: ${r.title} (${r.source_type})]\n${r.snippet || r.raw_content?.substring(0, 500) || ''}`
+          )
+          .join('\n\n---\n\n')
+      : ''
+
+    // Knowledge objects context (concepts, formulas)
+    const knowledgeContext = hasKnowledgeObjects
+      ? knowledgeObjects
+          .map(
+            (ko: any) => {
+              const content = ko.content as any
+              if (ko.object_type === 'formula') {
+                return `[Formula: ${ko.title}]\n${content?.latex || ko.summary || ''}`
+              }
+              return `[${ko.object_type.charAt(0).toUpperCase() + ko.object_type.slice(1)}: ${ko.title}]\n${ko.summary || ''}`
+            }
+          )
+          .join('\n\n')
+      : ''
+
+    // Combine all contexts
+    const context = [courseContext, webContext, knowledgeContext].filter(Boolean).join('\n\n===\n\n')
 
     // ------------------------------------------
     // STEP 4 — ENHANCED SYSTEM PROMPT WITH CONTEXT AWARENESS
@@ -430,15 +508,19 @@ serve(async (req) => {
       contextInfo += `\nCURRENT QUESTION: ${questionPrompt.substring(0, 200)}${questionPrompt.length > 200 ? '...' : ''}`
     }
     
+    const hasAnyContext = hasMaterials || hasWebResults || hasKnowledgeObjects
+    
     const systemPrompt = `You are GRASP, a concise AI tutor helping students with ${courseName || 'their coursework'}.
 
-${hasMaterials 
-  ? `COURSE MATERIALS (prefer these when relevant):
+${hasAnyContext 
+  ? `AVAILABLE SOURCES:
 ${context}
 
 RULES:
 - PREFER information from course materials when available
-- If course materials don't cover the question, use your knowledge to help
+- Use knowledge objects (concepts, formulas) for precise definitions
+- Web sources provide supplementary context (Quizlet, GitHub, past exams)
+- If sources don't cover the question, use your knowledge to help
 - Keep answers SHORT (3-5 sentences for simple questions, max 8-10 for complex ones)
 - Use bullet points for lists, not paragraphs
 - No citations or source references in your response`
@@ -458,7 +540,42 @@ Be direct and helpful. Get to the point quickly.`
     // STEP 5 — LLM call
     // ------------------------------------------
     console.log('[rag-chat] Calling LLM…')
+    const llmStartTime = Date.now()
     const answer = await callLLM(systemPrompt, message)
+    const llmDuration = Date.now() - llmStartTime
+
+    // Track LLM usage (non-blocking)
+    try {
+      const inputTokens = Math.ceil((systemPrompt.length + message.length) / 4) // Rough estimate
+      const outputTokens = Math.ceil(answer.length / 4)
+      const costEstimate = (inputTokens * 0.01 + outputTokens * 0.03) / 1000 // GPT-4 Turbo pricing
+      
+      await supabase
+        .from('llm_usage')
+        .insert({
+          user_id: user.id,
+          feature: 'rag_chat',
+          model: 'gpt-4-turbo-preview',
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          cost_estimate: costEstimate,
+          metadata: {
+            courseId: normalizedCourseId,
+            topicId: normalizedTopicId,
+            questionId: normalizedQuestionId,
+            hasMaterials,
+            hasWebResults,
+            hasKnowledgeObjects,
+            contextChunks: pages?.length || 0,
+            externalChunks: externalResults?.length || 0,
+            knowledgeChunks: knowledgeObjects?.length || 0,
+            duration_ms: llmDuration,
+          },
+        })
+      console.log('[rag-chat] LLM usage tracked')
+    } catch (usageError) {
+      console.warn('[rag-chat] Failed to track LLM usage (non-critical):', usageError)
+    }
 
     // ------------------------------------------
     // STEP 6 — Save assistant message (non-blocking)
@@ -466,6 +583,34 @@ Be direct and helpful. Get to the point quickly.`
     let assistantMessageId: string | null = null
     if (threadId) {
       assistantMessageId = await saveMessage(supabase, threadId, user.id, 'assistant', answer)
+    }
+
+    // ------------------------------------------
+    // STEP 6.5 — Save RAG contexts for audit trail (non-blocking)
+    // ------------------------------------------
+    if (assistantMessageId && pages && pages.length > 0) {
+      try {
+        const ragContexts = pages.slice(0, 10).map((p: any) => ({
+          message_id: assistantMessageId,
+          page_id: p.id || null,
+          document_id: p.document_id || null,
+          source_type: 'page' as const,
+          similarity_score: p.similarity,
+          content_preview: p.content?.substring(0, 500) || null,
+        }))
+        
+        const { error: ragError } = await supabase
+          .from('chat_rag_contexts')
+          .insert(ragContexts)
+        
+        if (ragError) {
+          console.warn('[rag-chat] Failed to save RAG contexts (non-critical):', ragError)
+        } else {
+          console.log(`[rag-chat] Saved ${ragContexts.length} RAG contexts for message ${assistantMessageId}`)
+        }
+      } catch (ragSaveError) {
+        console.warn('[rag-chat] RAG context save error (non-critical):', ragSaveError)
+      }
     }
 
     // ------------------------------------------

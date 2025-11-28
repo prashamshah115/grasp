@@ -299,3 +299,4 @@ export function getTotalDuration(tasks: StudyTask[]): number {
   return tasks.reduce((sum, task) => sum + task.duration_minutes, 0);
 }
 
+

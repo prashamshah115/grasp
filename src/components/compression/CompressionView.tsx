@@ -24,6 +24,10 @@ import { FileManagement } from '../storage/FileManagement'
 import { PDFViewerModal } from '../shared/PDFViewer'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
+import rehypeHighlight from 'rehype-highlight'
 
 type SidebarTab = 'topics' | 'finals'
 
@@ -427,10 +431,13 @@ export function CompressionView() {
                       </span>
                       <h2 className="text-2xl tracking-tight">{item.topic.name}</h2>
                     </div>
-                    <div className="prose prose-lg max-w-none">
-                      <div className="whitespace-pre-wrap text-[#374151] leading-relaxed">
+                    <div className="prose prose-lg max-w-none text-[#374151] leading-relaxed">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[rehypeRaw, rehypeHighlight]}
+                      >
                         {item.content}
-                      </div>
+                      </ReactMarkdown>
                     </div>
                   </div>
                 ))}
@@ -518,10 +525,13 @@ export function CompressionView() {
                 <div className="text-gray-500">Loading notes...</div>
               </div>
             ) : notes ? (
-              <div className="prose prose-lg max-w-none">
-                <div className="whitespace-pre-wrap text-[#374151] leading-relaxed">
+              <div className="prose prose-lg max-w-none text-[#374151] leading-relaxed">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw, rehypeHighlight]}
+                >
                   {notes.content_md}
-                </div>
+                </ReactMarkdown>
               </div>
             ) : (
               // No notes yet - show generate button

@@ -46,3 +46,12 @@ export * from './useUserCourses'
 
 // Finals
 export * from './useFinals'
+
+// Relevant Content
+export * from './useRelevantContent'
+
+// Knowledge Graph
+export * from './useKnowledgeGraph'
+
+// Web Search
+export * from './useWebSearch'
