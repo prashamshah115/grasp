@@ -188,7 +188,7 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'gpt-5-nano',
+      model: 'gpt-4-turbo-preview',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }

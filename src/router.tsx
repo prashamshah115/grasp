@@ -44,7 +44,7 @@ import ExamDefinition from './components/ExamDefinition'
 import ExamResults from './components/ExamResults'
 
 // Finals components
-import { FinalPackView } from './components/finals/FinalPackView'
+import { FinalPackViewPage } from './components/finals/FinalPackViewPage'
 import { GradedAssignmentUpload } from './components/finals/GradedAssignmentUpload'
 
 // Auth & Error components (default exports)
@@ -110,7 +110,7 @@ const routes: RouteObject[] = [
           // Finals - Final Pack
           {
             path: 'finals/pack',
-            element: <FinalPackView />,
+            element: <FinalPackViewPage />,
           },
           // Finals - Upload graded assignment
           {

@@ -340,6 +340,6 @@ export async function callLLMWithHistory(
 // DEFAULT MODEL CONSTANTS (Nov 2025)
 // ============================================
 
-export const DEFAULT_MODEL = 'gpt-5-nano';  // Best value: $0.05/1M input, $0.40/1M output
+export const DEFAULT_MODEL = 'gpt-4-turbo-preview';  // Updated to use existing OpenAI model
 export const FALLBACK_MODEL = 'gemini-1.5-flash';
 
