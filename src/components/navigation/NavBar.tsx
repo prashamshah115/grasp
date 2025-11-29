@@ -48,7 +48,7 @@ export function NavBar() {
       <div className="max-w-7xl mx-auto px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <div className="text-xl tracking-tight">grasp.ai</div>
+          <div className="text-xl tracking-tight">novalo.io</div>
 
           {/* 3-Pillar Navigation */}
           <div className="flex gap-1">

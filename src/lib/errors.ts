@@ -3,7 +3,7 @@
  * Custom error classes and helpers for API/LLM failures
  */
 
-export class GraspError extends Error {
+export class NovaloError extends Error {
   constructor(
     public code: string,
     message: string,
@@ -11,46 +11,46 @@ export class GraspError extends Error {
     public context?: any
   ) {
     super(message)
-    this.name = 'GraspError'
+    this.name = 'NovaloError'
   }
 }
 
-export class NetworkError extends GraspError {
+export class NetworkError extends NovaloError {
   constructor(message: string, context?: any) {
     super('NETWORK_ERROR', message, true, context)
     this.name = 'NetworkError'
   }
 }
 
-export class RAGError extends GraspError {
+export class RAGError extends NovaloError {
   constructor(message: string, context?: any) {
     super('RAG_ERROR', `Failed to retrieve context: ${message}`, false, context)
     this.name = 'RAGError'
   }
 }
 
-export class SessionError extends GraspError {
+export class SessionError extends NovaloError {
   constructor(message: string, context?: any) {
     super('SESSION_ERROR', message, true, context)
     this.name = 'SessionError'
   }
 }
 
-export class AuthError extends GraspError {
+export class AuthError extends NovaloError {
   constructor(message: string = 'User not authenticated', context?: any) {
     super('AUTH_ERROR', message, false, context)
     this.name = 'AuthError'
   }
 }
 
-export class ValidationError extends GraspError {
+export class ValidationError extends NovaloError {
   constructor(message: string, context?: any) {
     super('VALIDATION_ERROR', message, true, context)
     this.name = 'ValidationError'
   }
 }
 
-export class SupabaseError extends GraspError {
+export class SupabaseError extends NovaloError {
   constructor(message: string, context?: any) {
     super('SUPABASE_ERROR', message, true, context)
     this.name = 'SupabaseError'
@@ -90,14 +90,14 @@ export async function retryWithBackoff<T>(
   })
 }
 
-// Type guard for GraspError
-export function isGraspError(error: unknown): error is GraspError {
-  return error instanceof GraspError
+// Type guard for NovaloError
+export function isNovaloError(error: unknown): error is NovaloError {
+  return error instanceof NovaloError
 }
 
 // Format error for display
 export function formatError(error: unknown): string {
-  if (isGraspError(error)) {
+  if (isNovaloError(error)) {
     return error.message
   }
 

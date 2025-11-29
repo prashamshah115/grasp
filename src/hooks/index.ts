@@ -53,5 +53,8 @@ export * from './useRelevantContent'
 // Knowledge Graph
 export * from './useKnowledgeGraph'
 
+// Knowledge State Vector (KSV)
+export * from './useKnowledgeState'
+
 // Web Search
 export * from './useWebSearch'

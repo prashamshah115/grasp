@@ -7,7 +7,7 @@
 import { useRouteError, isRouteErrorResponse, Link } from 'react-router-dom'
 import { AlertCircle, Home, RefreshCw } from 'lucide-react'
 import { Button } from './ui/button'
-import { isGraspError, formatError } from '@/lib/errors'
+import { isNovaloError, formatError } from '@/lib/errors'
 
 export default function ErrorBoundary() {
   const error = useRouteError()
@@ -21,7 +21,7 @@ export default function ErrorBoundary() {
     // React Router error (404, etc.)
     errorCode = error.status
     errorMessage = error.statusText || error.data?.message || 'Page not found'
-  } else if (isGraspError(error)) {
+  } else if (isNovaloError(error)) {
     // Our custom error
     errorCode = error.code
     errorMessage = error.message

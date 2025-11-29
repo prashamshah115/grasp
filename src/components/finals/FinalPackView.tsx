@@ -21,8 +21,10 @@ import {
   ChevronRight 
 } from 'lucide-react';
 import { useFinalPacks, useMustSolveTopics, useTriggerFinalPacks } from '@/hooks/useFinals';
+import { useKnowledgeState } from '@/hooks/useKnowledgeState';
 import LoadingScreen from '@/components/LoadingScreen';
-import { RefreshCw, Loader2 } from 'lucide-react';
+import { RefreshCw, Loader2, AlertCircle } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 interface FinalPackViewProps {
   courseId: string;
@@ -64,7 +66,16 @@ export function FinalPackView({ courseId, courseCode, onStartPractice }: FinalPa
   // Fetch data from real hooks
   const { data: packs, isLoading: packsLoading, refetch: refetchPacks } = useFinalPacks(courseId);
   const { data: mustSolveData, isLoading: mustSolveLoading } = useMustSolveTopics(courseId);
+  const { data: ksvData } = useKnowledgeState(courseId);
   const triggerFinalPacks = useTriggerFinalPacks();
+
+  // Get weak topic IDs for highlighting
+  const weakTopicIds = new Set(
+    ksvData?.filter(ksv => ksv.knowledge_strength < 0.5).map(ksv => ksv.topic_id) || []
+  );
+
+  // Helper to check if a topic is weak
+  const isWeakTopic = (topicId?: string) => topicId && weakTopicIds.has(topicId);
 
   const isLoading = packsLoading || mustSolveLoading;
   const hasNoPacks = !packs || packs.length === 0;
@@ -86,12 +97,24 @@ export function FinalPackView({ courseId, courseCode, onStartPractice }: FinalPa
   const essentials = essentialsPack?.content as EssentialsContent | undefined;
   const drillsContent = drillsPack?.content as DrillsContent | undefined;
 
+  // Get personalized annotation text
+  const weakTopicNames = ksvData
+    ?.filter(ksv => ksv.knowledge_strength < 0.5)
+    .slice(0, 3)
+    .map(ksv => ksv.topic_name)
+    .filter(Boolean) || [];
+
+  const personalizedAnnotation = weakTopicNames.length > 0
+    ? `Your recent wrong answers suggest focusing on these formulas first: ${weakTopicNames.join(', ')}.`
+    : null;
+
   // Transform essentials data into key formulas and definitions
   const keyFormulas = essentials?.topics?.flatMap((topic, topicIdx) => 
     (topic.formulas || []).map((formula, formulaIdx) => ({
       id: `${topicIdx}-${formulaIdx}`,
       topic: formula.name || topic.name,
       formula: formula.plain || formula.latex,
+      topicId: topic.topic_id, // If available in final pack content
     }))
   ) || [];
 
@@ -181,6 +204,17 @@ export function FinalPackView({ courseId, courseCode, onStartPractice }: FinalPa
         {/* Essentials Tab */}
         {activeTab === 'essentials' && (
           <div className="space-y-6">
+            {/* Personalized Annotation */}
+            {personalizedAnnotation && weakTopicNames.length > 0 && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-blue-900 mb-1">Personalized Recommendation</p>
+                  <p className="text-sm text-blue-800">{personalizedAnnotation}</p>
+                </div>
+              </div>
+            )}
+
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-medium">Key Formulas</h3>
@@ -188,22 +222,38 @@ export function FinalPackView({ courseId, courseCode, onStartPractice }: FinalPa
               </div>
               {keyFormulas.length > 0 ? (
                 <div className="space-y-3">
-                  {keyFormulas.map((item) => (
-                    <div
-                      key={item.id}
-                      className="p-4 bg-[#F9FAFB] rounded-[12px] border border-[#E5E7EB] hover:border-[#4F46E5] transition-all group"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 rounded-[8px] bg-[#EEF2FF] flex items-center justify-center flex-shrink-0">
-                          <Calculator className="w-4 h-4 text-[#4F46E5]" />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm text-[#9CA3AF] mb-1">{item.topic}</p>
-                          <p className="font-mono text-sm">{item.formula}</p>
+                  {keyFormulas.map((item) => {
+                    const isWeak = item.topicId ? isWeakTopic(item.topicId) : false;
+                    return (
+                      <div
+                        key={item.id}
+                        className={`p-4 rounded-[12px] border transition-all group ${
+                          isWeak
+                            ? 'bg-orange-50 border-orange-200 hover:border-orange-400'
+                            : 'bg-[#F9FAFB] border-[#E5E7EB] hover:border-[#4F46E5]'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={`w-8 h-8 rounded-[8px] flex items-center justify-center flex-shrink-0 ${
+                            isWeak ? 'bg-orange-100' : 'bg-[#EEF2FF]'
+                          }`}>
+                            <Calculator className={`w-4 h-4 ${isWeak ? 'text-orange-600' : 'text-[#4F46E5]'}`} />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className={`text-sm ${isWeak ? 'text-orange-700' : 'text-[#9CA3AF]'}`}>{item.topic}</p>
+                              {isWeak && (
+                                <Badge variant="outline" className="text-xs border-orange-300 text-orange-700">
+                                  Focus
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="font-mono text-sm">{item.formula}</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="p-6 bg-[#F9FAFB] rounded-[12px] border border-[#E5E7EB] text-center">
@@ -292,40 +342,62 @@ export function FinalPackView({ courseId, courseCode, onStartPractice }: FinalPa
               </div>
               {mustSolveData?.importantTopics && mustSolveData.importantTopics.length > 0 ? (
                 <div className="space-y-3">
-                  {mustSolveData.importantTopics.map((topic) => (
-                    <button
-                      key={topic.id}
-                      onClick={() => onStartPractice(topic.id)}
-                      className="w-full p-5 bg-[#FAFAFA] hover:bg-[#F5F5F5] rounded-[14px] border border-[#E5E7EB] hover:border-[#4F46E5] transition-all group text-left"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4 flex-1">
-                          <div className="w-10 h-10 rounded-[10px] bg-white flex items-center justify-center border border-[#E5E7EB]">
-                            <Target className="w-5 h-5 text-[#4F46E5]" />
+                  {mustSolveData.importantTopics.map((topic) => {
+                    const isWeak = isWeakTopic(topic.id);
+                    const ksvForTopic = ksvData?.find(ksv => ksv.topic_id === topic.id);
+                    return (
+                      <button
+                        key={topic.id}
+                        onClick={() => onStartPractice(topic.id)}
+                        className={`w-full p-5 rounded-[14px] border transition-all group text-left ${
+                          isWeak
+                            ? 'bg-orange-50 hover:bg-orange-100 border-orange-200 hover:border-orange-400'
+                            : 'bg-[#FAFAFA] hover:bg-[#F5F5F5] border-[#E5E7EB] hover:border-[#4F46E5]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4 flex-1">
+                            <div className={`w-10 h-10 rounded-[10px] flex items-center justify-center border ${
+                              isWeak ? 'bg-orange-100 border-orange-300' : 'bg-white border-[#E5E7EB]'
+                            }`}>
+                              <Target className={`w-5 h-5 ${isWeak ? 'text-orange-600' : 'text-[#4F46E5]'}`} />
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-1">
+                                <p className="font-medium">{topic.topic}</p>
+                                <span className={`px-2 py-0.5 rounded-[6px] text-xs font-medium ${getPriorityColor(topic.priority)}`}>
+                                  {topic.priority}
+                                </span>
+                                {isWeak && (
+                                  <Badge variant="outline" className="text-xs border-orange-300 text-orange-700 bg-orange-50">
+                                    <AlertCircle className="w-3 h-3 mr-1" />
+                                    Weak
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 text-sm text-[#6B7280]">
+                                <span>{topic.questions} questions</span>
+                                <span>•</span>
+                                <span>{topic.difficulty}</span>
+                                {ksvForTopic && (
+                                  <>
+                                    <span>•</span>
+                                    <span>{(ksvForTopic.knowledge_strength * 100).toFixed(0)}% strength</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-1">
-                              <p className="font-medium">{topic.topic}</p>
-                              <span className={`px-2 py-0.5 rounded-[6px] text-xs font-medium ${getPriorityColor(topic.priority)}`}>
-                                {topic.priority}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-3 text-sm text-[#6B7280]">
-                              <span>{topic.questions} questions</span>
-                              <span>•</span>
-                              <span>{topic.difficulty}</span>
-                            </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-[#4F46E5] opacity-0 group-hover:opacity-100 transition-opacity">
+                              Start Practice
+                            </span>
+                            <ChevronRight className="w-5 h-5 text-[#9CA3AF] group-hover:text-[#4F46E5] group-hover:translate-x-1 transition-all" />
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-[#4F46E5] opacity-0 group-hover:opacity-100 transition-opacity">
-                            Start Practice
-                          </span>
-                          <ChevronRight className="w-5 h-5 text-[#9CA3AF] group-hover:text-[#4F46E5] group-hover:translate-x-1 transition-all" />
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="p-6 bg-[#F9FAFB] rounded-[12px] border border-[#E5E7EB] text-center text-[#6B7280]">

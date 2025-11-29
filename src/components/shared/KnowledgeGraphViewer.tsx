@@ -47,10 +47,10 @@ export function KnowledgeGraphViewer({ courseId, courseName }: KnowledgeGraphVie
     }
   };
 
-  // Group edges by relationship type
-  const prerequisites = graphEdges?.filter(e => e.relationship_type === 'prerequisite') || [];
-  const overlaps = graphEdges?.filter(e => e.relationship_type === 'overlap') || [];
-  const dependencies = graphEdges?.filter(e => e.relationship_type === 'dependent') || [];
+  // Group edges by relationship type (use 'relation' field from database)
+  const prerequisites = graphEdges?.filter(e => e.relation === 'prerequisite') || [];
+  const overlaps = graphEdges?.filter(e => e.relation === 'overlap') || [];
+  const dependencies = graphEdges?.filter(e => e.relation === 'dependent') || [];
 
   // Group concepts by topic
   const conceptsByTopic = new Map<string, typeof concepts>();
@@ -336,5 +336,6 @@ export function KnowledgeGraphViewer({ courseId, courseName }: KnowledgeGraphVie
 }
 
 export default KnowledgeGraphViewer;
+
 
 

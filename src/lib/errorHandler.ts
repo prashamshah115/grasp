@@ -3,7 +3,7 @@
  * Maps technical errors to user-friendly messages
  */
 
-import { GraspError, isGraspError, NetworkError, AuthError, ValidationError, SupabaseError } from './errors'
+import { NovaloError, isNovaloError, NetworkError, AuthError, ValidationError, SupabaseError } from './errors'
 
 export interface UserFriendlyError {
   title: string
@@ -17,7 +17,7 @@ export interface UserFriendlyError {
  */
 export function classifyError(error: unknown): UserFriendlyError {
   // Handle our custom errors
-  if (isGraspError(error)) {
+  if (isNovaloError(error)) {
     switch (error.code) {
       case 'NETWORK_ERROR':
         return {
@@ -156,6 +156,7 @@ export function logError(error: unknown, context?: string): void {
   //   await supabase.functions.invoke('log-error', { body: errorInfo })
   // }
 }
+
 
 
 

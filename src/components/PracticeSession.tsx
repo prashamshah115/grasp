@@ -28,6 +28,7 @@ import { useAuth } from '@/components/auth/AuthProvider'
 import { useGlobalQuestion, useUpdateQuestionHistory } from '@/hooks/useGlobalPractice'
 import { useSubmitAnswer, useEndSession } from '@/hooks/useSessions'
 import { useUpdateMastery } from '@/hooks/useMastery'
+import { useTriggerKSVUpdate } from '@/hooks/useKnowledgeState'
 import { fetchSessionDetails } from '@/lib/api'
 import { PDFViewerModal } from '@/components/shared/PDFViewer'
 import { AIAssistant } from '@/components/shared/AIAssistant'
@@ -123,6 +124,7 @@ export function PracticeSession() {
 
   // Update mastery after session
   const updateMasteryMutation = useUpdateMastery()
+  const triggerKSVUpdate = useTriggerKSVUpdate()
 
   // ==================== EFFECTS ====================
 
@@ -214,6 +216,11 @@ export function PracticeSession() {
       await updateMasteryMutation.mutateAsync({
         session_id: session.id,
       })
+
+      // Trigger KSV update after mastery is updated
+      if (session.course_id) {
+        triggerKSVUpdate.mutate(session.course_id)
+      }
 
       // Force immediate refetch of mastery queries (course + topics)
       queryClient.invalidateQueries({ queryKey: ['mastery'] })

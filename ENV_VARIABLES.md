@@ -32,6 +32,10 @@ OPENAI_API_KEY=your_openai_api_key
 GROQ_API_KEY=your_groq_api_key
 JINA_API_KEY=your_jina_api_key
 TAVILY_API_KEY=your_tavily_api_key
+
+# Google OAuth (for Supabase Auth)
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
 ```
 
 ## Trigger.dev Variables
@@ -71,6 +75,9 @@ Or create `supabase/.env` with backend variables only.
 6. **SUPABASE_GRAPHQL_URL:** `https://<project-ref>.supabase.co/graphql/v1`
 7. **SUPABASE_DB_PASSWORD:** Set during project creation (or reset in Database settings)
 
+8. **GOOGLE_CLIENT_ID:** Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID (Web application)
+9. **GOOGLE_CLIENT_SECRET:** Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID → Client Secret
+
 ## Notes
 
 - Frontend variables (VITE_*) are bundled into the client code
@@ -78,5 +85,6 @@ Or create `supabase/.env` with backend variables only.
 - In Vercel, you must scope variables to Development/Preview/Production
 - Supabase Edge Functions need all backend variables
 - Trigger.dev tasks need all backend variables synced via trigger.config.ts
+- Google OAuth credentials are used by Supabase Auth (server-side only) - configure in Supabase Dashboard → Authentication → Providers → Google
 
 

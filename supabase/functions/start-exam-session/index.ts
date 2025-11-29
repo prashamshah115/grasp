@@ -20,6 +20,7 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   handleError,
   handleCORS,
@@ -80,28 +81,9 @@ serve(async (req) => {
     console.log(`[${FUNCTION_NAME}] Method:`, req.method)
     console.log(`[${FUNCTION_NAME}] Headers:`, Object.fromEntries(req.headers.entries()))
 
-    // Check environment variables
-    const supabaseUrl = Deno.env.get('PUBLIC_SUPABASE_URL')
-    const serviceRoleKey = Deno.env.get('SERVICE_ROLE_KEY')
-    
-    if (!supabaseUrl) {
-      console.error(`[${FUNCTION_NAME}] Missing PUBLIC_SUPABASE_URL environment variable`)
-      throw new Error('Server configuration error: Missing PUBLIC_SUPABASE_URL')
-    }
-    
-    if (!serviceRoleKey) {
-      console.error(`[${FUNCTION_NAME}] Missing SERVICE_ROLE_KEY environment variable`)
-      throw new Error('Server configuration error: Missing SERVICE_ROLE_KEY')
-    }
-
-    console.log(`[${FUNCTION_NAME}] Environment check passed`)
-
-    // Initialize Supabase client with service role
-    const supabase = createClient(supabaseUrl, serviceRoleKey)
-
-    // Authenticate user
+    // Authenticate user and get Supabase client
     console.log(`[${FUNCTION_NAME}] Authenticating user...`)
-    const { user } = await requireAuth(req, supabase)
+    const { supabase, user } = await requireAuth(req)
     console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
 
     // Parse and validate request body

@@ -136,7 +136,7 @@ export function CourseCatalog() {
       {/* Header */}
       <header className="px-8 py-6 border-b border-[#E5E7EB]">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl tracking-tight">grasp.ai</h1>
+          <h1 className="text-xl tracking-tight">novalo.io</h1>
 
           {user && (
             <div className="flex items-center gap-4">

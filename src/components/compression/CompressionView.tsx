@@ -16,6 +16,7 @@ import { FileText, Sparkles, Upload, Download, FolderOpen, FileIcon, Book, Gradu
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useCourse, useTopics, useCompressionNotes, useGenerateCompression } from '@/hooks'
+import { useTriggerKSVUpdate } from '@/hooks/useKnowledgeState'
 import { useAuth } from '@/components/auth/AuthProvider'
 import LoadingScreen from '../LoadingScreen'
 import { AIAssistant } from '../shared/AIAssistant'
@@ -116,6 +117,7 @@ export function CompressionView() {
 
   // Generate compression mutation
   const generateCompression = useGenerateCompression()
+  const triggerKSVUpdate = useTriggerKSVUpdate()
 
   // Combine all loading states
   const isLoading = authLoading || courseLoading || topicsLoading
@@ -146,6 +148,11 @@ export function CompressionView() {
         user_id: user.id,
         topic_id: selectedTopicId,
       })
+      
+      // Trigger KSV update after generating compression notes (engagement tracking)
+      if (courseId) {
+        triggerKSVUpdate.mutate(courseId)
+      }
       
       if (result && result.content) {
         // Success - query will be invalidated automatically by the mutation

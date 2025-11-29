@@ -8,7 +8,7 @@ export function LandingPage() {
       {/* Header */}
       <header className="px-8 py-6 border-b border-[#E5E7EB]">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <h1 className="text-xl tracking-tight">grasp.ai</h1>
+          <h1 className="text-xl tracking-tight">novalo.io</h1>
           <button
             onClick={() => openAuthModal('signin')}
             className="text-sm font-medium text-[#4F46E5] hover:text-[#4338CA] transition-colors"

@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Slider } from '@/components/ui/slider';
+import { Badge } from '@/components/ui/badge';
 import { 
   useFinalsDashboard, 
   useUserFinalPreferences,
@@ -33,9 +34,11 @@ import {
   useRecentTasks,
   type FinalsDashboardData 
 } from '@/hooks/useFinals';
+import { useRecommendedTopics } from '@/hooks/useKnowledgeState';
 import { compressTasks, formatTimeBudget, getTotalDuration, type StudyTask } from '@/lib/task-compression';
 import { MasteryRing } from '@/components/MasteryRing';
 import LoadingScreen from '@/components/LoadingScreen';
+import { PredictionScoreWidget } from './PredictionScoreWidget';
 
 interface FinalsCommandCenterProps {
   courseId?: string;
@@ -52,6 +55,7 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
   const { mutate: updatePreferences } = useUpdateFinalPreferences();
   const { data: weakTopics } = useWeakTopics(courseId);
   const { data: recentTasks } = useRecentTasks(courseId);
+  const { data: recommendedTopics, isLoading: recommendationsLoading } = useRecommendedTopics(courseId, 3);
 
   // Get current course data
   const currentCourse = courseId 
@@ -194,12 +198,80 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
           </Card>
         </div>
 
-        {/* Task Compression */}
+        {/* Prediction Score Widget */}
+        {courseId && <PredictionScoreWidget courseId={courseId} />}
+
+        {/* What to Study Next - KSV-based recommendations */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-primary" />
+              What to Study Next
+            </CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Personalized recommendations based on your knowledge state
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {recommendationsLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="animate-pulse p-4 rounded-lg border bg-gray-50 h-20"></div>
+                ))}
+              </div>
+            ) : recommendedTopics && recommendedTopics.length > 0 ? (
+              <div className="space-y-3">
+                {recommendedTopics.map((topic, index) => (
+                  <div
+                    key={topic.topic_id}
+                    className="flex items-start gap-4 p-4 rounded-lg border bg-card hover:border-primary/50 transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium flex-shrink-0">
+                      {index + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <p className="font-medium">{topic.topic_name}</p>
+                        <Badge variant="outline" className="text-xs flex-shrink-0">
+                          {(topic.recommendation_score * 100).toFixed(0)}% priority
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {topic.justification}
+                      </p>
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span>Strength: {(topic.knowledge_strength * 100).toFixed(0)}%</span>
+                        {topic.weakness_score > 0.5 && (
+                          <span className="text-orange-600">Needs review</span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => navigate(`/course/${courseId}/practice?topic=${topic.topic_id}`)}
+                      className="flex-shrink-0"
+                    >
+                      <Play className="w-4 h-4 mr-1" />
+                      Study
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Target className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>Complete some practice to get personalized recommendations</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Legacy Task Compression (keep for backward compatibility) */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-yellow-500" />
-              Smart Study Plan
+              Quick Study Plan (Time-based)
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -367,5 +439,6 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
 }
 
 export default FinalsCommandCenter;
+
 
 

@@ -96,9 +96,17 @@ export function useUserFinalPreferences(courseId: string | undefined) {
         .eq('course_id', courseId)
         .single();
 
-      if (error && error.code !== 'PGRST116') {
-        console.error('Error fetching final preferences:', error);
-        throw error;
+      // Handle missing table (406) or not found (PGRST116) gracefully
+      // PGRST116 = not found, 406 = table doesn't exist or RLS issue
+      if (error) {
+        const isNotFound = error.code === 'PGRST116';
+        const isTableMissing = (error as any).status === 406 || error.message?.includes('406');
+        
+        if (!isNotFound && !isTableMissing) {
+          console.error('Error fetching final preferences:', error);
+          throw error;
+        }
+        // Return null for missing table or not found - this is expected
       }
 
       return data;

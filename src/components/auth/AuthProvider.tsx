@@ -19,6 +19,7 @@ interface AuthContextValue {
   closeAuthModal: () => void
   signOut: () => Promise<void>
   resendConfirmation: () => Promise<void>
+  signInWithGoogle: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -48,16 +49,48 @@ export function AuthProvider({ children }: AuthProviderProps) {
     sessionUser: NonNullable<Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']>['user'] | null,
   ): AuthUser | null => {
     if (!sessionUser) return null
+    // Extract name from Google OAuth metadata or fallback to email
+    const name = 
+      (sessionUser.user_metadata?.full_name as string) ??
+      (sessionUser.user_metadata?.name as string) ??
+      sessionUser.email ??
+      ''
     return {
       id: sessionUser.id,
       email: sessionUser.email ?? '',
-      name: (sessionUser.user_metadata?.full_name as string) ?? sessionUser.email ?? '',
+      name: name || null,
     }
   }
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
     setUser(null)
+  }, [])
+
+  const signInWithGoogle = useCallback(async () => {
+    setAuthError(null)
+    setIsSubmitting(true)
+    try {
+      // Get the current path to redirect back to the same page after auth
+      const redirectPath = window.location.pathname === '/' ? '/courses' : window.location.pathname
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}${redirectPath}`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      })
+      if (error) throw error
+      // Note: User will be redirected to Google, then Supabase callback, then back to app
+      // The redirectTo ensures they land on your domain, not Supabase's
+    } catch (error) {
+      console.error('Google OAuth error', error)
+      setAuthError(error instanceof Error ? error.message : 'Google sign-in failed')
+      setIsSubmitting(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -184,8 +217,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       closeAuthModal,
       signOut,
       resendConfirmation,
+      signInWithGoogle,
     }),
-    [user, isLoading, pendingConfirmation, pendingEmail, openAuthModal, closeAuthModal, signOut, resendConfirmation],
+    [user, isLoading, pendingConfirmation, pendingEmail, openAuthModal, closeAuthModal, signOut, resendConfirmation, signInWithGoogle],
   )
 
   // Show email confirmation screen if pending

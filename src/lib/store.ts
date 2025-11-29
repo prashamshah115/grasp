@@ -222,7 +222,7 @@ export const useAppStore = create<AppState>()(
       setError: (error) => set({ error }),
     }),
     {
-      name: 'grasp-storage',
+      name: 'novalo-storage',
       storage: createJSONStorage(() => localStorage),
       // Only persist user auth state
       partialize: (state) => ({

@@ -199,7 +199,7 @@ export default function ChatPanel() {
               <BookOpen className="w-6 h-6 text-[#4F46E5]" />
             </div>
             <div>
-              <h1 className="text-2xl font-semibold text-[#111827]">GRASP Tutor</h1>
+              <h1 className="text-2xl font-semibold text-[#111827]">Novalo Tutor</h1>
               <p className="text-[#6B7280]">
                 {topic
                   ? `${course?.name || 'Course'} • ${topic.name}`

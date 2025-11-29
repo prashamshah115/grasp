@@ -90,7 +90,7 @@ export function ExamView() {
     }
   }, [activeSessions, activeSessionMap, exams])
 
-  const isLoading = courseLoading || examsLoading || activeSessionsLoading
+  const isLoading = courseLoading || examsLoading || sessionsLoading || activeSessionsLoading
 
   if (isLoading) {
     return <LoadingScreen message="Loading exams..." />

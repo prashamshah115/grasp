@@ -64,7 +64,7 @@ export function NotesViewer({ courseId, onBack }: NotesViewerProps) {
             <ArrowLeft className="w-5 h-5" />
             <span>Back</span>
           </button>
-          <h1 className="text-xl tracking-tight">grasp.ai</h1>
+          <h1 className="text-xl tracking-tight">novalo.io</h1>
         </div>
       </header>
 

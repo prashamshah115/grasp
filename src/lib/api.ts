@@ -1349,6 +1349,168 @@ export async function triggerKnowledgeGraphGeneration(courseId: string) {
   )
 }
 
+// ==================== KNOWLEDGE STATE VECTOR (KSV) ====================
+
+/**
+ * Fetch knowledge state vector for a course
+ */
+export async function fetchKnowledgeStateVector(courseId: string, userId: string) {
+  const { data, error } = await supabase
+    .from('knowledge_state_vector')
+    .select(`
+      *,
+      topic:topics(id, name, slug)
+    `)
+    .eq('course_id', courseId)
+    .eq('user_id', userId)
+    .order('recommendation_score', { ascending: false })
+
+  if (error) {
+    console.error('Error fetching knowledge state vector:', error)
+    throw error
+  }
+
+  // Transform to include topic name and slug
+  return (data || []).map((item: any) => ({
+    ...item,
+    topic_name: item.topic?.name,
+    topic_slug: item.topic?.slug,
+  }))
+}
+
+/**
+ * Fetch recommended topics with justifications
+ */
+export async function fetchRecommendedTopics(
+  courseId: string,
+  userId: string,
+  limit: number = 3
+) {
+  const { data, error } = await supabase
+    .from('knowledge_state_vector')
+    .select(`
+      *,
+      topic:topics(id, name, slug)
+    `)
+    .eq('course_id', courseId)
+    .eq('user_id', userId)
+    .order('recommendation_score', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.error('Error fetching recommended topics:', error)
+    throw error
+  }
+
+  return (data || []).map((item: any) => {
+    const weakness_score = 1 - item.knowledge_strength
+    const importance_score = item.graph_out_degree > 0 ? 1 : 0
+    
+    // Generate justification
+    let justification = 'Recommended for review'
+    if (weakness_score > 0.7) {
+      justification = 'Weak in prerequisites'
+    } else if (item.graph_out_degree > 2) {
+      justification = 'High importance (many downstream topics)'
+    } else if (item.error_rate > 0.5) {
+      justification = 'High error rate in recent attempts'
+    } else if (!item.last_reviewed_at) {
+      justification = 'Not reviewed recently'
+    }
+
+    return {
+      topic_id: item.topic_id,
+      topic_name: item.topic?.name || 'Unknown',
+      recommendation_score: item.recommendation_score,
+      priority_rank: item.priority_rank,
+      justification,
+      knowledge_strength: item.knowledge_strength,
+      weakness_score,
+      importance_score,
+    }
+  })
+}
+
+/**
+ * Calculate predicted final exam score
+ */
+export async function calculatePredictionScore(courseId: string, userId: string) {
+  // Get all KSV for the course
+  const ksvData = await fetchKnowledgeStateVector(courseId, userId)
+
+  if (ksvData.length === 0) {
+    return {
+      predicted_score: 0,
+      confidence: 0,
+      improvement_potential: 0,
+      fixable_topics: [],
+    }
+  }
+
+  // Calculate average knowledge strength (weighted by graph importance)
+  const totalStrength = ksvData.reduce((sum, ksv) => {
+    const weight = 1 + (ksv.graph_out_degree * 0.1) // More important topics weighted higher
+    return sum + (ksv.knowledge_strength * weight)
+  }, 0)
+
+  const totalWeight = ksvData.reduce((sum, ksv) => {
+    return sum + (1 + (ksv.graph_out_degree * 0.1))
+  }, 0)
+
+  const avgStrength = totalWeight > 0 ? totalStrength / totalWeight : 0
+
+  // Convert to predicted score (0-100)
+  const predicted_score = Math.round(avgStrength * 100)
+
+  // Calculate confidence based on coverage
+  const avgCoverage = ksvData.reduce((sum, ksv) => sum + ksv.coverage, 0) / ksvData.length
+  const confidence = Math.round(avgCoverage * 100)
+
+  // Find fixable topics (low strength, high importance)
+  const fixable_topics = ksvData
+    .filter(ksv => ksv.knowledge_strength < 0.6 && ksv.graph_out_degree > 0)
+    .sort((a, b) => {
+      // Sort by potential gain (importance * weakness)
+      const gainA = (1 - a.knowledge_strength) * (1 + a.graph_out_degree * 0.1)
+      const gainB = (1 - b.knowledge_strength) * (1 + b.graph_out_degree * 0.1)
+      return gainB - gainA
+    })
+    .slice(0, 3)
+    .map(ksv => ({
+      topic_id: ksv.topic_id,
+      topic_name: ksv.topic_name || 'Unknown',
+      potential_gain: Math.round((1 - ksv.knowledge_strength) * 10), // Estimated points
+      current_strength: ksv.knowledge_strength,
+    }))
+
+  // Calculate improvement potential
+  const improvement_potential = fixable_topics.reduce((sum, topic) => sum + topic.potential_gain, 0)
+
+  return {
+    predicted_score,
+    confidence,
+    improvement_potential,
+    fixable_topics,
+  }
+}
+
+/**
+ * Trigger KSV update via edge function
+ */
+export async function triggerKSVUpdate(courseId: string, userId: string) {
+  const user = await requireAuth()
+
+  return safeInvoke(
+    'compute-ksv',
+    {
+      body: {
+        course_id: courseId,
+        user_id: userId,
+      },
+    }
+  )
+}
+
 // ==================== WEB SEARCH ====================
 
 export interface WebSearchResult {

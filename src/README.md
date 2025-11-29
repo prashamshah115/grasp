@@ -1,4 +1,4 @@
-# grasp.ai - Exam-Focused Study Assistant
+# novalo.io - Exam-Focused Study Assistant
 
 A modern, minimal web application designed to help students ace their exams through structured workout sessions, mastery tracking, and auto-generated cheatsheets.
 
