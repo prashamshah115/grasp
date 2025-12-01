@@ -6,6 +6,7 @@ import { precomputeFinalPacks } from './precompute-final-packs';
 import { updateRagCache } from './update-rag-cache';
 import { extractQuestions } from './extract-questions';
 import { embedWebResults } from './embed-web-results';
+import { extractParagraphs } from './extract-paragraphs';
 
 interface FinalizeDocumentPayload {
   documentId: string;
@@ -168,6 +169,11 @@ export const finalizeDocument = task({
             embedWebResults.trigger(
               { courseId },
               { idempotencyKey: `web-${idempotencyBase}`, idempotencyKeyTTL: "24h" }
+            ),
+            // NEW: Extract paragraphs for paragraph-level retrieval
+            extractParagraphs.trigger(
+              { documentId, courseId },
+              { idempotencyKey: `ep-${idempotencyBase}`, idempotencyKeyTTL: "24h" }
             ),
           ];
           

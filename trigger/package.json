@@ -2,6 +2,9 @@
   "name": "grasp-trigger-workers",
   "version": "1.0.0",
   "description": "Trigger.dev workers for GRASP PDF processing",
+  "trigger.dev": {
+    "endpointId": "grasp-trigger-workers"
+  },
   "scripts": {
     "dev": "trigger dev",
     "deploy": "trigger deploy"

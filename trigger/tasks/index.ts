@@ -32,6 +32,10 @@ export { embedWebResults } from './embed-web-results';
 export { extractQuestions } from './extract-questions';
 export { generateStudyPlan } from './generate-study-plan';
 
+// NEW: Precision Engine tasks (December 2024)
+export { extractParagraphs } from './extract-paragraphs';
+export { generatePersonalizedStudyPack } from './generate-personalized-study-pack';
+
 // Scheduled tasks
 export { dailyKnowledgeGraphRefresh } from './scheduled/daily-knowledge-graph';
 export { dailyFinalPacksRefresh } from './scheduled/daily-final-packs';
