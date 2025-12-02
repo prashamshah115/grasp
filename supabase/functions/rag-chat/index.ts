@@ -11,6 +11,15 @@ import {
   requireAuth,
   ValidationError,
 } from '../_shared/errors.ts'
+import {
+  logFunctionStart,
+  logFunctionEnd,
+  logQuery,
+  logApiCall,
+  logError,
+  logValidationError,
+  createTimer,
+} from '../_shared/logger.ts'
 
 interface RAGRequest {
   message: string
@@ -175,39 +184,89 @@ async function generateBGEEmbedding(text: string): Promise<number[]> {
 }
 
 // ------------------------------------------
-// LLM HELPER — OpenAI GPT-5 Nano (Nov 2025 - 200x cheaper than GPT-4 Turbo)
+// LLM HELPER — OpenAI GPT-4 Turbo
 // ------------------------------------------
-async function callLLM(systemPrompt: string, userMessage: string): Promise<string> {
+async function callLLM(
+  systemPrompt: string, 
+  userMessage: string,
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>
+): Promise<string> {
   const apiKey = Deno.env.get('OPENAI_API_KEY')
-  if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'gpt-5-nano',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ],
-      temperature: 0.3, // Lower for more focused responses
-      max_tokens: 400, // Shorter, concise answers
-      top_p: 0.9,
-      frequency_penalty: 0.2,
-      presence_penalty: 0.1
-    })
-  })
-
-  if (!response.ok) {
-    const err = await response.text()
-    throw new Error(`OpenAI API error: ${err}`)
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY not configured. Please set this environment variable in Supabase Edge Functions secrets.')
   }
 
-  const data = await response.json()
-  return data.choices[0].message.content
+  // Build messages array with conversation history
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: systemPrompt }
+  ]
+  
+  // Add conversation history if provided
+  if (conversationHistory && conversationHistory.length > 0) {
+    conversationHistory.forEach(msg => {
+      messages.push({
+        role: msg.role,
+        content: msg.content
+      })
+    })
+  }
+  
+  // Add current user message
+  messages.push({ role: 'user', content: userMessage })
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4-turbo-preview', // Use valid OpenAI model
+        messages: messages,
+        temperature: 0.3, // Lower for more focused responses
+        max_tokens: 400, // Shorter, concise answers
+        top_p: 0.9,
+        frequency_penalty: 0.2,
+        presence_penalty: 0.1
+      })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      let errMessage = `OpenAI API error: ${response.status}`
+      try {
+        const errJson = JSON.parse(errText)
+        errMessage = errJson.error?.message || errMessage
+      } catch {
+        errMessage = `${errMessage} - ${errText.substring(0, 200)}`
+      }
+      
+      // Provide helpful error messages for common issues
+      if (response.status === 401) {
+        throw new Error('OpenAI API key is invalid. Please check your OPENAI_API_KEY configuration.')
+      } else if (response.status === 429) {
+        throw new Error('OpenAI API rate limit exceeded. Please try again in a moment.')
+      } else if (response.status === 500 || response.status === 503) {
+        throw new Error('OpenAI API is temporarily unavailable. Please try again later.')
+      }
+      
+      throw new Error(errMessage)
+    }
+
+    const data = await response.json()
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('Invalid response format from OpenAI API')
+    }
+    
+    return data.choices[0].message.content
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('OpenAI')) {
+      throw error // Re-throw OpenAI-specific errors
+    }
+    throw new Error(`LLM call failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 // ------------------------------------------
@@ -215,6 +274,7 @@ async function callLLM(systemPrompt: string, userMessage: string): Promise<strin
 // ------------------------------------------
 serve(async (req) => {
   const FUNCTION_NAME = 'rag-chat'
+  const timer = createTimer(FUNCTION_NAME)
 
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -222,45 +282,54 @@ serve(async (req) => {
   }
 
   try {
-    console.log(`[${FUNCTION_NAME}] Request received:`, {
+    logFunctionStart(FUNCTION_NAME, {
       method: req.method,
       url: req.url,
-      headers: Object.fromEntries(req.headers.entries()),
     })
 
     // Authenticate user and get properly configured Supabase client
     // This uses the CORRECT Supabase v2 pattern for Edge Functions
+    timer.checkpoint('auth_start')
     const { supabase, user } = await requireAuth(req)
-    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
+    timer.checkpoint('auth_complete', { userId: user.id })
 
     // Rate limiting check
+    timer.checkpoint('rate_limit_start')
     const rateLimitResult = await checkRateLimit(user.id, RATE_LIMITS.rag_chat)
     if (!rateLimitResult.allowed) {
-      console.log(`[${FUNCTION_NAME}] Rate limit exceeded for user:`, user.id)
+      logError(FUNCTION_NAME, new Error('Rate limit exceeded'), {
+        userId: user.id,
+        remaining: rateLimitResult.remaining,
+      })
+      timer.end({ success: false, reason: 'rate_limit' })
       return rateLimitResponse(rateLimitResult)
     }
-
-    console.log(`[${FUNCTION_NAME}] Rate limit OK - remaining:`, rateLimitResult.remaining)
+    timer.checkpoint('rate_limit_ok', { remaining: rateLimitResult.remaining })
 
     // Safe JSON parsing with error handling
+    timer.checkpoint('parse_start')
     let body: RAGRequest
     try {
       const rawBody = await req.text()
-      console.log(`[${FUNCTION_NAME}] Raw request body:`, rawBody.substring(0, 200))
       body = JSON.parse(rawBody) as RAGRequest
-      console.log(`[${FUNCTION_NAME}] Parsed body:`, {
-        message: body.message?.substring(0, 50),
-        topicId: body.topicId,
-        courseId: body.courseId,
-        questionId: body.questionId,
+      timer.checkpoint('parse_complete', {
+        messageLength: body.message?.length || 0,
+        hasTopicId: !!body.topicId,
+        hasCourseId: !!body.courseId,
+        hasQuestionId: !!body.questionId,
       })
     } catch (error) {
-      console.error(`[${FUNCTION_NAME}] JSON parse error:`, error)
+      logError(FUNCTION_NAME, error, { step: 'json_parse' })
+      timer.end({ success: false, reason: 'parse_error' })
       throw new ValidationError(`Invalid JSON in request body: ${error instanceof Error ? error.message : String(error)}`)
     }
 
     // Input validation
     if (!body.message || typeof body.message !== 'string' || body.message.trim().length === 0) {
+      logValidationError(FUNCTION_NAME, 'message', body.message, 'Message is required and cannot be empty', {
+        userId: user.id,
+      })
+      timer.end({ success: false, reason: 'validation_error' })
       throw new ValidationError('Message is required and cannot be empty')
     }
 
@@ -324,11 +393,27 @@ serve(async (req) => {
     // ------------------------------------------
     // STEP 1 — BGE embedding (768d)
     // ------------------------------------------
-    console.log('[rag-chat] Generating BGE embedding...')
-    const queryEmbedding = await generateBGEEmbedding(message)
-
-    if (queryEmbedding.length !== 768)
-      throw new Error(`Invalid embedding dimension: expected 768, got ${queryEmbedding.length}`)
+    timer.checkpoint('embedding_start')
+    let queryEmbedding: number[]
+    try {
+      const embeddingStartTime = Date.now()
+      queryEmbedding = await generateBGEEmbedding(message)
+      const embeddingDuration = Date.now() - embeddingStartTime
+      
+      if (queryEmbedding.length !== 768) {
+        throw new Error(`Invalid embedding dimension: expected 768, got ${queryEmbedding.length}`)
+      }
+      
+      logApiCall(FUNCTION_NAME, 'generateBGEEmbedding', true, embeddingDuration, undefined, {
+        userId: user.id,
+        embeddingDimension: queryEmbedding.length,
+      })
+      timer.checkpoint('embedding_complete', { dimension: queryEmbedding.length })
+    } catch (error) {
+      logError(FUNCTION_NAME, error, { step: 'embedding', userId: user.id })
+      timer.end({ success: false, reason: 'embedding_error' })
+      throw new Error(`Failed to generate embedding: ${error instanceof Error ? error.message : String(error)}`)
+    }
 
     // ------------------------------------------
     // STEP 2 — VECTOR SEARCH (RPC)
@@ -350,24 +435,53 @@ serve(async (req) => {
 
     // Try vector search - RLS policies will handle access control
     // The RPC function should return documents where user has access (public, own, or enrolled course)
-    let { data: pages, error: searchError } = await supabase.rpc(
-      'search_document_pages',
-      {
-        query_embedding: queryEmbedding,
-        filter_course_id: normalizedCourseId,
-        filter_topic_id: normalizedTopicId,
-        filter_user_id: user.id, // Pass user ID but RLS will allow access to public/enrolled docs
-        match_threshold: 0.6, // Lower threshold to get more results
-        match_count: 15 // Increase count
+    timer.checkpoint('vector_search_start')
+    let pages: any[] | null = null
+    let searchError: any = null
+    
+    try {
+      const searchStartTime = Date.now()
+      const result = await supabase.rpc(
+        'search_document_pages',
+        {
+          query_embedding: queryEmbedding,
+          filter_course_id: normalizedCourseId,
+          filter_topic_id: normalizedTopicId,
+          filter_user_id: user.id, // Pass user ID but RLS will allow access to public/enrolled docs
+          match_threshold: 0.6, // Lower threshold to get more results
+          match_count: 15 // Increase count
+        }
+      )
+      const searchDuration = Date.now() - searchStartTime
+      
+      pages = result.data
+      searchError = result.error
+      
+      logQuery(FUNCTION_NAME, 'search_document_pages', {
+        count: pages?.length || 0,
+        error: searchError,
+      }, {
+        userId: user.id,
+        courseId: normalizedCourseId,
+        topicId: normalizedTopicId,
+        duration: searchDuration,
+      })
+      
+      if (searchError) {
+        logError(FUNCTION_NAME, searchError, {
+          step: 'vector_search',
+          userId: user.id,
+          courseId: normalizedCourseId,
+        })
+        // Don't throw - continue with empty results, LLM can still help
       }
-    )
-
-    if (searchError) {
-      console.error('[rag-chat] Vector search error:', searchError)
-      // Log but don't throw - will check for documents below
+      
+      timer.checkpoint('vector_search_complete', { pageCount: pages?.length || 0 })
+    } catch (error) {
+      logError(FUNCTION_NAME, error, { step: 'vector_search_exception', userId: user.id })
+      // Continue with empty pages - graceful degradation
+      pages = null
     }
-
-    console.log('[rag-chat] Found', pages?.length || 0, 'pages')
 
     // ------------------------------------------
     // STEP 2.5 — SEARCH EXTERNAL RESULTS (web content)
@@ -466,6 +580,96 @@ serve(async (req) => {
     const context = [courseContext, webContext, knowledgeContext].filter(Boolean).join('\n\n===\n\n')
 
     // ------------------------------------------
+    // STEP 3.5 — FETCH USER MEMORY, MASTERY, AND CONVERSATION HISTORY
+    // ------------------------------------------
+    timer.checkpoint('memory_fetch_start')
+    
+    // Fetch user memory (3 keys: preferred_style, struggling_topic, misconception)
+    let userMemory: Record<string, string> = {}
+    if (normalizedCourseId) {
+      try {
+        const { data: memories } = await supabase
+          .from('user_memory')
+          .select('memory_key, memory_value')
+          .eq('user_id', user.id)
+          .eq('course_id', normalizedCourseId)
+          .in('memory_key', ['preferred_style', 'struggling_topic', 'misconception'])
+        
+        if (memories) {
+          memories.forEach(m => {
+            userMemory[m.memory_key] = m.memory_value
+          })
+        }
+        console.log(`[rag-chat] Loaded ${Object.keys(userMemory).length} memory entries`)
+      } catch (memoryError) {
+        console.warn(`[rag-chat] Failed to fetch user memory (non-critical):`, memoryError)
+      }
+    }
+    
+    // Fetch weak topics from user_topic_mastery
+    let weakTopics: string[] = []
+    if (normalizedCourseId) {
+      try {
+        const { data: mastery } = await supabase
+          .from('user_topic_mastery')
+          .select('topic_id, mastery_score, topics (name)')
+          .eq('user_id', user.id)
+          .eq('course_id', normalizedCourseId)
+          .lt('mastery_score', 0.4)
+          .order('mastery_score', { ascending: true })
+          .limit(3)
+        
+        if (mastery) {
+          weakTopics = mastery
+            .filter(m => {
+              const topic = m.topics as any
+              return topic && (Array.isArray(topic) ? topic[0]?.name : topic.name)
+            })
+            .map(m => {
+              const topic = m.topics as any
+              return Array.isArray(topic) ? topic[0]?.name : topic?.name
+            })
+            .filter(Boolean) as string[]
+        }
+        console.log(`[rag-chat] Found ${weakTopics.length} weak topics`)
+      } catch (masteryError) {
+        console.warn(`[rag-chat] Failed to fetch mastery (non-critical):`, masteryError)
+      }
+    }
+    
+    // Fetch last 20 messages for conversation history
+    let conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = []
+    if (threadId) {
+      try {
+        const { data: messages } = await supabase
+          .from('chat_messages')
+          .select('role, content')
+          .eq('thread_id', threadId)
+          .in('role', ['user', 'assistant'])
+          .order('created_at', { ascending: false })
+          .limit(20)
+        
+        if (messages) {
+          conversationHistory = messages
+            .reverse() // Reverse to chronological order
+            .map(m => ({
+              role: m.role as 'user' | 'assistant',
+              content: m.content
+            }))
+        }
+        console.log(`[rag-chat] Loaded ${conversationHistory.length} messages from history`)
+      } catch (historyError) {
+        console.warn(`[rag-chat] Failed to fetch conversation history (non-critical):`, historyError)
+      }
+    }
+    
+    timer.checkpoint('memory_fetch_complete', {
+      memoryCount: Object.keys(userMemory).length,
+      weakTopicsCount: weakTopics.length,
+      historyCount: conversationHistory.length
+    })
+    
+    // ------------------------------------------
     // STEP 4 — ENHANCED SYSTEM PROMPT WITH CONTEXT AWARENESS
     // ------------------------------------------
     
@@ -510,7 +714,29 @@ serve(async (req) => {
     
     const hasAnyContext = hasMaterials || hasWebResults || hasKnowledgeObjects
     
-    const systemPrompt = `You are GRASP, a concise AI tutor helping students with ${courseName || 'their coursework'}.
+    // Build memory section
+    let memorySection = ''
+    if (Object.keys(userMemory).length > 0) {
+      memorySection = '\nUSER MEMORY:\n'
+      if (userMemory.preferred_style) {
+        memorySection += `- Preferred explanation style: ${userMemory.preferred_style}\n`
+      }
+      if (userMemory.struggling_topic) {
+        memorySection += `- Struggles with: ${userMemory.struggling_topic}\n`
+      }
+      if (userMemory.misconception) {
+        memorySection += `- Common misconception: ${userMemory.misconception}\n`
+      }
+    }
+    
+    // Build mastery hints section
+    let masteryHints = ''
+    if (weakTopics.length > 0) {
+      masteryHints = `\nWEAK TOPICS TO WATCH:\n${weakTopics.map(t => `- ${t}`).join('\n')}\n`
+      masteryHints += 'When relevant, proactively address these topics and provide extra clarity.\n'
+    }
+    
+    const systemPrompt = `You are GRASP, a concise AI tutor helping students with ${courseName || 'their coursework'}.${memorySection}${masteryHints}
 
 ${hasAnyContext 
   ? `AVAILABLE SOURCES:
@@ -521,14 +747,16 @@ RULES:
 - Use knowledge objects (concepts, formulas) for precise definitions
 - Web sources provide supplementary context (Quizlet, GitHub, past exams)
 - If sources don't cover the question, use your knowledge to help
-- Keep answers SHORT (3-5 sentences for simple questions, max 8-10 for complex ones)
+- ${userMemory.preferred_style === 'short' ? 'Keep answers VERY SHORT (2-3 sentences).' : userMemory.preferred_style === 'detailed' ? 'Provide detailed explanations when helpful.' : 'Keep answers SHORT (3-5 sentences for simple questions, max 8-10 for complex ones)'}
 - Use bullet points for lists, not paragraphs
-- No citations or source references in your response`
+- No citations or source references in your response
+- ${weakTopics.length > 0 ? 'When discussing topics related to weak areas, provide extra clarity and examples.' : ''}`
   : `RULES:
 - Use your knowledge to help answer the question
 - Focus on ${courseName ? `the course: ${courseName}` : 'the subject matter'}
-- Keep answers SHORT (3-5 sentences for simple questions, max 8-10 for complex ones)
-- Use bullet points for lists, not paragraphs`
+- ${userMemory.preferred_style === 'short' ? 'Keep answers VERY SHORT (2-3 sentences).' : userMemory.preferred_style === 'detailed' ? 'Provide detailed explanations when helpful.' : 'Keep answers SHORT (3-5 sentences for simple questions, max 8-10 for complex ones)'}
+- Use bullet points for lists, not paragraphs
+- ${weakTopics.length > 0 ? 'When discussing topics related to weak areas, provide extra clarity and examples.' : ''}`
 }
 
 CONTEXT:
@@ -537,12 +765,50 @@ ${contextInfo}
 Be direct and helpful. Get to the point quickly.`
 
     // ------------------------------------------
-    // STEP 5 — LLM call
+    // STEP 5 — LLM call with conversation history
     // ------------------------------------------
-    console.log('[rag-chat] Calling LLM…')
-    const llmStartTime = Date.now()
-    const answer = await callLLM(systemPrompt, message)
-    const llmDuration = Date.now() - llmStartTime
+    timer.checkpoint('llm_start')
+    let answer: string
+    try {
+      const llmStartTime = Date.now()
+      
+      // Build messages array with conversation history
+      const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+        { role: 'system', content: systemPrompt }
+      ]
+      
+      // Add conversation history (last 20 messages)
+      if (conversationHistory.length > 0) {
+        conversationHistory.forEach(msg => {
+          messages.push({
+            role: msg.role,
+            content: msg.content
+          })
+        })
+      }
+      
+      // Add current user message
+      messages.push({ role: 'user', content: message })
+      
+      // Call LLM with conversation history
+      answer = await callLLM(systemPrompt, message, conversationHistory)
+      const llmDuration = Date.now() - llmStartTime
+      
+      logApiCall(FUNCTION_NAME, 'callLLM', true, llmDuration, undefined, {
+        userId: user.id,
+        answerLength: answer.length,
+        hasContext: hasAnyContext,
+      })
+      timer.checkpoint('llm_complete', { answerLength: answer.length })
+    } catch (error) {
+      logError(FUNCTION_NAME, error, {
+        step: 'llm_call',
+        userId: user.id,
+        hasContext: hasAnyContext,
+      })
+      timer.end({ success: false, reason: 'llm_error' })
+      throw new Error(`LLM call failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
 
     // Track LLM usage (non-blocking)
     try {
@@ -624,10 +890,13 @@ Be direct and helpful. Get to the point quickly.`
       publicUrl: p.public_url
     }))
 
-    console.log(`[${FUNCTION_NAME}] Success`, {
+    timer.end({
+      success: true,
       threadId,
       userMessageId,
-      assistantMessageId
+      assistantMessageId,
+      citationsCount: citations.length,
+      pagesCount: (pages || []).length,
     })
 
     // Return success response with CORS headers
@@ -641,8 +910,11 @@ Be direct and helpful. Get to the point quickly.`
     } as RAGResponse)
 
   } catch (error) {
-    console.error(`[${FUNCTION_NAME}] Unhandled error:`, error)
-    console.error(`[${FUNCTION_NAME}] Error stack:`, error instanceof Error ? error.stack : 'No stack')
+    logError(FUNCTION_NAME, error, {
+      step: 'unhandled_error',
+      userId: (error as any)?.userId || 'unknown',
+    })
+    timer.end({ success: false, reason: 'unhandled_error' })
     return handleError(error, FUNCTION_NAME)
   }
 })

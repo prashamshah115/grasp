@@ -13,6 +13,7 @@ import type { FinalPacksLLMResponse } from "../lib/types";
 interface FinalPackPayload {
   courseId: string;
   forceFresh?: boolean;
+  jobStatusId?: string; // Optional: ID of job_status record created by edge function
 }
 
 // =====================================================
@@ -267,14 +268,49 @@ export const precomputeFinalPacks = task({
     randomize: true,
   },
   // Classify errors - abort on fatal, retry on transient
-  catchError: async ({ error }) => {
+  catchError: async ({ error, ctx }) => {
+    // Update job status to failed on error
+    try {
+      const supabase = createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+      const runId = ctx?.run?.id;
+      
+      if (runId) {
+        const { data: jobStatus } = await supabase
+          .from('job_status')
+          .select('id')
+          .eq('trigger_job_id', runId)
+          .eq('job_type', 'final_packs')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (jobStatus) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          await supabase
+            .from('job_status')
+            .update({
+              status: 'failed',
+              error_message: errorMessage,
+              completed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', jobStatus.id);
+        }
+      }
+    } catch (updateError) {
+      logger.warn('Failed to update job_status on error', { error: updateError });
+    }
+
     const errorMessage = error instanceof Error ? error.message : String(error);
     
     // Fatal errors - don't retry
     if (errorMessage.includes("Course not found")) {
       throw new AbortTaskRunError("Course does not exist - cannot proceed");
     }
-    if (errorMessage.includes("no_knowledge_objects")) {
+    if (errorMessage.includes("no_knowledge_objects") || errorMessage.includes("Prerequisites not met")) {
       throw new AbortTaskRunError("No knowledge objects - run precompute-knowledge-objects first");
     }
     if (errorMessage.includes("SUPABASE_URL") || errorMessage.includes("SUPABASE_SERVICE_ROLE_KEY")) {
@@ -284,8 +320,8 @@ export const precomputeFinalPacks = task({
     // Allow retry for transient errors
     return undefined;
   },
-  run: async (payload: FinalPackPayload) => {
-    const { courseId } = payload;
+  run: async (payload: FinalPackPayload, { ctx }) => {
+    const { courseId, jobStatusId } = payload;
     logger.info(`[precompute-final-packs] Starting for course ${courseId}`);
     
     // Initialize progress metadata
@@ -299,6 +335,97 @@ export const precomputeFinalPacks = task({
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
+    // Get run ID for job status tracking
+    const runId = ctx?.run?.id;
+
+    // Helper function to update job status
+    const updateJobStatus = async (
+      status: 'running' | 'completed' | 'failed',
+      progress?: number,
+      errorMessage?: string,
+      metadata?: Record<string, any>
+    ) => {
+      try {
+        // Find job_status record (by ID if provided, or by course_id + job_type + latest)
+        let jobStatusRecord;
+        if (jobStatusId) {
+          const { data } = await supabase
+            .from('job_status')
+            .select('id')
+            .eq('id', jobStatusId)
+            .single();
+          jobStatusRecord = data;
+        } else if (runId) {
+          // Try to find by trigger_job_id
+          const { data } = await supabase
+            .from('job_status')
+            .select('id')
+            .eq('trigger_job_id', runId)
+            .eq('job_type', 'final_packs')
+            .eq('course_id', courseId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          jobStatusRecord = data;
+        }
+
+        if (jobStatusRecord) {
+          const updateData: any = {
+            status,
+            updated_at: new Date().toISOString(),
+          };
+          if (progress !== undefined) updateData.progress_percent = progress;
+          if (errorMessage) updateData.error_message = errorMessage;
+          if (status === 'completed' || status === 'failed') {
+            updateData.completed_at = new Date().toISOString();
+          }
+          if (metadata) updateData.metadata = metadata;
+          if (runId && !jobStatusRecord.trigger_job_id) {
+            updateData.trigger_job_id = runId;
+          }
+
+          await supabase
+            .from('job_status')
+            .update(updateData)
+            .eq('id', jobStatusRecord.id);
+        } else if (runId && status === 'running') {
+          // Create job_status record if it doesn't exist
+          await supabase.from('job_status').insert({
+            job_type: 'final_packs',
+            course_id: courseId,
+            trigger_job_id: runId,
+            status: 'running',
+            progress_percent: progress || 0,
+            metadata: metadata || {},
+          });
+        }
+      } catch (error) {
+        logger.warn('Failed to update job_status', { error });
+      }
+    };
+
+    // Check prerequisites
+    try {
+      const { data: prereqData, error: prereqError } = await supabase
+        .rpc('check_final_packs_prerequisites', { p_course_id: courseId });
+
+      if (prereqError) {
+        logger.warn('Failed to check prerequisites', { error: prereqError });
+      } else if (prereqData && !prereqData.can_generate) {
+        const errorMsg = `Prerequisites not met: ${(prereqData.missing_items || []).join(', ')}. Run precompute-knowledge-objects first.`;
+        logger.warn(errorMsg);
+        metadata.set("stage", "prerequisites_not_met");
+        await updateJobStatus('failed', 0, errorMsg);
+        throw new AbortTaskRunError(errorMsg);
+      }
+    } catch (error) {
+      if (error instanceof AbortTaskRunError) throw error;
+      logger.warn('Prerequisites check failed, continuing anyway', { error });
+    }
+
+    // Update job status to running
+    await updateJobStatus('running', 0);
+
     // Get course and knowledge objects (pre-extracted, much smaller than raw docs)
     metadata.set("stage", "fetching_data");
     const { course, knowledgeObjects, documentTitles } = await getCourseAndKnowledgeObjects(supabase, courseId);
@@ -309,9 +436,15 @@ export const precomputeFinalPacks = task({
       .set("knowledgeObjectsCount", knowledgeObjects.length)
       .set("progress", 10);
 
+    await updateJobStatus('running', 10, undefined, {
+      courseCode: course.code,
+      knowledgeObjectsCount: knowledgeObjects.length,
+    });
+
     if (knowledgeObjects.length === 0) {
       logger.warn("No knowledge objects found. Run precompute-knowledge-objects first.");
       metadata.set("stage", "no_knowledge_objects");
+      await updateJobStatus('failed', 10, "No knowledge objects found. Run precompute-knowledge-objects first.");
       return { success: false, reason: "no_knowledge_objects" };
     }
 
@@ -320,6 +453,9 @@ export const precomputeFinalPacks = task({
     const existingQuestions = await getCourseQuestions(supabase, courseId);
     logger.info(`Found ${existingQuestions.length} existing questions in DB`);
     metadata.set("existingQuestionsCount", existingQuestions.length).set("progress", 20);
+    await updateJobStatus('running', 20, undefined, {
+      existingQuestionsCount: existingQuestions.length,
+    });
 
     // Fetch web search results - HEAVY SEARCH (5 queries, 50 results)
     metadata.set("stage", "web_search");
@@ -333,6 +469,10 @@ export const precomputeFinalPacks = task({
       metadata.set("webSearchFailed", true);
     }
     metadata.set("progress", 40);
+    await updateJobStatus('running', 40, undefined, {
+      webResultsCount: webResults.length,
+      webSearchFailed: webResults.length === 0,
+    });
 
     // Aggregate and format web content by category
     const aggregatedWeb = aggregateWebContent(webResults);
@@ -382,6 +522,7 @@ Requirements:
       maxTokens: 12000, // Larger output for comprehensive packs
     });
     metadata.set("progress", 70);
+    await updateJobStatus('running', 70);
 
     const parsed = safeParseJSON<FinalPacksLLMResponse>(raw);
     logger.info(`Parsed ${parsed.packs.essentials.length} essentials, ${parsed.packs.must_solve.length} must_solve, ${parsed.packs.drills.length} drills`);
@@ -442,6 +583,7 @@ Requirements:
 
     if (error) {
       logger.error("Failed to upsert final_packs", { error });
+      await updateJobStatus('failed', 80, `Database error: ${error.message}`);
       throw error;
     }
 
@@ -457,6 +599,8 @@ Requirements:
       .set("stage", "completed")
       .set("progress", 100)
       .set("stats", stats);
+
+    await updateJobStatus('completed', 100, undefined, stats);
 
     logger.info(`[precompute-final-packs] Completed for ${course.code}`, stats);
 

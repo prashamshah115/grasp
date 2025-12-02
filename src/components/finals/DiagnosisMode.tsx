@@ -18,6 +18,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useSubmitAnswer } from '@/hooks/useSessions';
 import { useUpdateMastery } from '@/hooks/useMastery';
+import { useTriggerStudyPlan } from '@/hooks/useFinals';
 import LoadingScreen from '@/components/LoadingScreen';
 
 interface DiagnosisModeProps {
@@ -59,6 +60,7 @@ export function DiagnosisMode({ courseId, onComplete }: DiagnosisModeProps) {
   const submitAnswerMutation = useSubmitAnswer();
   const updateMasteryMutation = useUpdateMastery();
   const triggerKSVUpdate = useTriggerKSVUpdate();
+  const triggerStudyPlan = useTriggerStudyPlan();
 
   // Fetch questions for diagnosis
   const { isLoading: questionsLoading, refetch: fetchQuestions } = useQuery({
@@ -179,6 +181,30 @@ export function DiagnosisMode({ courseId, onComplete }: DiagnosisModeProps) {
 
     setResults(allResults);
 
+    // Persist diagnostic status for finals flow gating
+    try {
+      if (user) {
+        const { error: statusError } = await supabase
+          .from('diagnostic_status')
+          .upsert(
+            {
+              user_id: user.id,
+              course_id: courseId,
+              completed: true,
+              score: correctCount,
+              completed_at: new Date().toISOString(),
+            },
+            { onConflict: 'user_id,course_id' }
+          );
+
+        if (statusError) {
+          console.warn('[DiagnosisMode] Failed to upsert diagnostic_status:', statusError);
+        }
+      }
+    } catch (statusException) {
+      console.warn('[DiagnosisMode] Error updating diagnostic_status:', statusException);
+    }
+
     // Trigger KSV update
     triggerKSVUpdate.mutate(courseId);
 
@@ -203,6 +229,29 @@ export function DiagnosisMode({ courseId, onComplete }: DiagnosisModeProps) {
     };
 
     setIsCompleted(true);
+    
+    // Auto-trigger study plan generation after diagnosis
+    // This happens in the background, user doesn't need to wait
+    try {
+      // Wait a bit for KSV to update, then trigger study plan
+      setTimeout(async () => {
+        try {
+          await triggerStudyPlan.mutateAsync({
+            courseId,
+            options: {
+              focusWeakTopics: true,
+            },
+          });
+          console.log('[DiagnosisMode] Auto-triggered study plan generation after diagnosis');
+        } catch (planError) {
+          // Non-blocking - if study plan generation fails, just log it
+          console.warn('[DiagnosisMode] Failed to auto-trigger study plan generation:', planError);
+        }
+      }, 2000); // Wait 2 seconds for KSV update to complete
+    } catch (error) {
+      console.warn('[DiagnosisMode] Error scheduling study plan generation:', error);
+    }
+    
     if (onComplete) {
       onComplete(diagnosisResults);
     }
@@ -274,21 +323,32 @@ export function DiagnosisMode({ courseId, onComplete }: DiagnosisModeProps) {
             </div>
           </div>
 
-          <Button
-            onClick={() => {
-              setIsDiagnosing(false);
-              setIsCompleted(false);
-              setQuestions([]);
-              setAnswers({});
-              setResults({});
-              setCurrentIndex(0);
-              triggerKSVUpdate.mutate(courseId);
-            }}
-            className="w-full"
-            variant="outline"
-          >
-            Run Another Diagnosis
-          </Button>
+          <div className="space-y-2">
+            <Button
+              onClick={() => {
+                navigate(`/course/${courseId}/finals/plan`);
+              }}
+              className="w-full"
+            >
+              <Target className="w-4 h-4 mr-2" />
+              View Study Plan
+            </Button>
+            <Button
+              onClick={() => {
+                setIsDiagnosing(false);
+                setIsCompleted(false);
+                setQuestions([]);
+                setAnswers({});
+                setResults({});
+                setCurrentIndex(0);
+                triggerKSVUpdate.mutate(courseId);
+              }}
+              className="w-full"
+              variant="outline"
+            >
+              Run Another Diagnosis
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );

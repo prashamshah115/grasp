@@ -183,7 +183,17 @@ export async function writeExamEvent(
 
   if (error) {
     console.error('[writeExamEvent] Database error:', error)
+    // Provide more detailed error information
+    const errorMessage = error.message || 'Unknown error'
+    const errorDetails = {
+      code: error.code,
+      message: errorMessage,
+      details: error.details,
+      hint: error.hint,
+    }
+    console.error('[writeExamEvent] Full error details:', errorDetails)
     handleSupabaseError(error)
+    throw new Error(`Failed to write exam event: ${errorMessage}`)
   } else {
     console.log('[writeExamEvent] Event written successfully:', data)
   }

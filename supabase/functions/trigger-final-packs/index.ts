@@ -82,12 +82,50 @@ serve(async (req) => {
       throw new ForbiddenError('You are not enrolled in this course')
     }
 
+    // Check prerequisites before triggering
+    const { data: prereqData, error: prereqError } = await supabase
+      .rpc('check_final_packs_prerequisites', { p_course_id: course_id })
+
+    if (prereqError) {
+      console.error(`[${FUNCTION_NAME}] Prerequisites check failed:`, prereqError)
+      throw new Error('Failed to check prerequisites')
+    }
+
+    if (!prereqData || !prereqData.can_generate) {
+      const missingItems = prereqData?.missing_items || ['unknown']
+      throw new ValidationError(
+        `Cannot generate final packs. Missing: ${missingItems.join(', ')}. ` +
+        `Please upload course materials and wait for processing to complete.`
+      )
+    }
+
     // Get Trigger.dev config
     const triggerUrl = Deno.env.get('TRIGGER_API_URL')
     const triggerKey = Deno.env.get('TRIGGER_SECRET_KEY')
 
     if (!triggerUrl || !triggerKey) {
       throw new Error('Trigger.dev not configured. Set TRIGGER_API_URL and TRIGGER_SECRET_KEY')
+    }
+
+    // Create job_status record (pending state)
+    const { data: jobStatus, error: jobStatusError } = await supabase
+      .from('job_status')
+      .insert({
+        job_type: 'final_packs',
+        course_id: course_id,
+        status: 'pending',
+        progress_percent: 0,
+        metadata: {
+          triggered_by: user.id,
+          course_code: course.code,
+        },
+      })
+      .select('id')
+      .single()
+
+    if (jobStatusError || !jobStatus) {
+      console.error(`[${FUNCTION_NAME}] Failed to create job_status:`, jobStatusError)
+      // Continue anyway - task will create it if needed
     }
 
     // Trigger the precompute-final-packs task
@@ -103,6 +141,7 @@ serve(async (req) => {
         payload: {
           courseId: course_id,
           forceFresh: true,
+          jobStatusId: jobStatus?.id, // Pass job_status ID to task
         },
       }),
     })
@@ -110,16 +149,41 @@ serve(async (req) => {
     if (!triggerResponse.ok) {
       const errorText = await triggerResponse.text()
       console.error(`[${FUNCTION_NAME}] Trigger.dev API error:`, triggerResponse.status, errorText)
+      
+      // Update job_status to failed
+      if (jobStatus?.id) {
+        await supabase
+          .from('job_status')
+          .update({
+            status: 'failed',
+            error_message: `Failed to trigger job: ${triggerResponse.status}`,
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', jobStatus.id)
+      }
+      
       throw new Error(`Failed to trigger final pack generation: ${triggerResponse.status}`)
     }
 
     const triggerData = await triggerResponse.json()
+    const runId = triggerData.id || triggerData.handle?.id
     console.log(`[${FUNCTION_NAME}] Trigger.dev response:`, triggerData)
+
+    // Update job_status with trigger_job_id
+    if (jobStatus?.id && runId) {
+      await supabase
+        .from('job_status')
+        .update({
+          trigger_job_id: runId,
+          status: 'running',
+        })
+        .eq('id', jobStatus.id)
+    }
 
     return successResponse({
       success: true,
       courseId: course_id,
-      jobId: triggerData.id || triggerData.handle?.id || 'unknown',
+      jobId: runId || 'unknown',
       message: `Final pack generation started for ${course.code}`,
     } as TriggerFinalPacksResponse)
 

@@ -9,6 +9,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchCompressionNotes, generateCompression } from '@/lib/api'
 import { queryKeys } from '@/lib/queryClient'
+import { logger } from '@/lib/logger'
 import type { GenerateCompressionRequest } from '@/types'
 
 /**
@@ -32,11 +33,30 @@ export function useGenerateCompression() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (request: GenerateCompressionRequest) => generateCompression(request),
+    mutationFn: async (request: GenerateCompressionRequest) => {
+      return logger.logApiCall(
+        'generateCompression',
+        () => generateCompression(request),
+        {
+          userId: request.user_id,
+          topicId: request.topic_id,
+        }
+      )
+    },
     onSuccess: (_, variables) => {
+      logger.info('Compression generated successfully', {
+        userId: variables.user_id,
+        topicId: variables.topic_id,
+      })
       // Invalidate compression for this topic
       queryClient.invalidateQueries({
         queryKey: queryKeys.compression.all,
+      })
+    },
+    onError: (error, variables) => {
+      logger.error('Failed to generate compression', error, {
+        userId: variables.user_id,
+        topicId: variables.topic_id,
       })
     },
   })

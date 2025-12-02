@@ -98,15 +98,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const loadSession = async () => {
       try {
-        const { data } = await supabase.auth.getSession()
+        const { data, error } = await supabase.auth.getSession()
         if (!mounted) return
         
-        const sessionUser = data.session?.user
-        const mappedUser = mapSupabaseUser(sessionUser)
+        // Handle session errors gracefully - don't crash the app
+        if (error) {
+          console.error('Failed to load session:', error)
+          // Continue with null user - app can still render
+        }
+        
+        const sessionUser = data?.session?.user
+        const mappedUser = mapSupabaseUser(sessionUser || null)
         setUser(mappedUser)
         
         // Check if user exists but no session (email confirmation pending)
-        if (sessionUser && !data.session) {
+        if (sessionUser && !data?.session) {
           setPendingConfirmation(true)
           setPendingEmail(sessionUser.email || null)
         } else {
@@ -114,7 +120,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
           setPendingEmail(null)
         }
       } catch (error) {
-        console.error('Failed to load session', error)
+        console.error('Failed to load session:', error)
+        // Don't crash - set loading to false so app can render
       } finally {
         if (mounted) setIsLoading(false)
       }

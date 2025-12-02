@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Minimize2, Maximize2, Loader2, MessageSquare, RotateCcw, Globe, Globe2 } from 'lucide-react';
+import { Sparkles, X, Send, Minimize2, Maximize2, Loader2, MessageSquare, RotateCcw, Globe, Globe2, Target, Lightbulb } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useChat } from '@/hooks/useChat';
 import { useWebSearch } from '@/hooks/useWebSearch';
+import { ErrorDisplay } from '@/components/errors/ErrorDisplay';
+import { logger } from '@/lib/logger';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 import type { UIMessage, ChatCitation } from '@/types/chat';
 
 interface AIAssistantProps {
@@ -44,6 +48,9 @@ export function AIAssistant({
     compressionNotes: compressionNotes || undefined,
   });
   
+  // Only disable send button when actually sending, not when loading initial data
+  const isActuallySending = isSending;
+  
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -52,6 +59,42 @@ export function AIAssistant({
   
   // Web search hook
   const webSearch = useWebSearch();
+
+  // Fetch user memory and weak topics for personalization indicators
+  const effectiveCourseId = courseId || urlCourseId;
+  const { data: userMemory } = useQuery({
+    queryKey: ['user-memory', user?.id, effectiveCourseId],
+    queryFn: async () => {
+      if (!user?.id || !effectiveCourseId) return null;
+      const { data } = await supabase
+        .from('user_memory')
+        .select('memory_key, memory_value')
+        .eq('user_id', user.id)
+        .eq('course_id', effectiveCourseId)
+        .in('memory_key', ['preferred_style', 'struggling_topic', 'misconception']);
+      return data || null;
+    },
+    enabled: !!user?.id && !!effectiveCourseId,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+
+  const { data: weakTopics } = useQuery({
+    queryKey: ['weak-topics', user?.id, effectiveCourseId],
+    queryFn: async () => {
+      if (!user?.id || !effectiveCourseId) return [];
+      const { data } = await supabase
+        .from('user_topic_mastery')
+        .select('topics(name), mastery_score')
+        .eq('user_id', user.id)
+        .eq('course_id', effectiveCourseId)
+        .lt('mastery_score', 0.4)
+        .order('mastery_score', { ascending: true })
+        .limit(3);
+      return data?.filter(t => t.topics?.name).map(t => t.topics.name) || [];
+    },
+    enabled: !!user?.id && !!effectiveCourseId,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
 
   // Context-aware initial greeting
   const getInitialGreeting = () => {
@@ -145,7 +188,7 @@ export function AIAssistant({
   }, [displayMessages.length]);
 
   const handleSend = async () => {
-    if (!inputValue.trim() || !user || isSending) return;
+    if (!inputValue.trim() || !user || isActuallySending) return;
 
     let messageText = inputValue;
     setInputValue('');
@@ -223,8 +266,21 @@ export function AIAssistant({
   if (!isOpen) {
     return (
       <button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 w-16 h-16 bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] rounded-full shadow-2xl hover:scale-110 transition-transform flex items-center justify-center group z-50"
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          try {
+            setIsOpen(true)
+          } catch (error) {
+            console.error('Error opening AI Assistant:', error)
+            // Fallback: still try to open
+            setIsOpen(true)
+          }
+        }}
+        className="fixed bottom-6 right-6 w-16 h-16 bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] rounded-full shadow-2xl hover:scale-110 transition-transform flex items-center justify-center group z-[9999]"
+        data-testid="ai-assistant-floating-button"
+        aria-label="Open AI Assistant"
+        type="button"
       >
         <Sparkles className="w-7 h-7 text-white" />
         <div className="absolute -top-1 -right-1 w-3 h-3 bg-[#10B981] rounded-full animate-pulse"></div>
@@ -241,7 +297,7 @@ export function AIAssistant({
   // Minimized state
   if (isMinimized) {
     return (
-      <div className="fixed bottom-6 right-6 z-50">
+      <div className="fixed bottom-6 right-6 z-[9999]">
         <button
           onClick={() => setIsMinimized(false)}
           className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] rounded-[16px] px-5 py-3 shadow-2xl hover:scale-105 transition-transform flex items-center gap-3"
@@ -259,7 +315,7 @@ export function AIAssistant({
 
   // Full chat interface
   return (
-    <div className="fixed bottom-6 right-6 w-[400px] h-[600px] bg-white rounded-[20px] shadow-2xl border border-[#E5E7EB] flex flex-col z-50">
+    <div className="fixed bottom-6 right-6 w-[400px] h-[600px] bg-white rounded-[20px] shadow-2xl border border-[#E5E7EB] flex flex-col z-[9999]">
       {/* Header */}
       <div className="bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] rounded-t-[20px] p-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -326,6 +382,41 @@ export function AIAssistant({
         </div>
       )}
 
+      {/* Memory indicators (if available) */}
+      {(userMemory && userMemory.length > 0) || (weakTopics && weakTopics.length > 0) ? (
+        <div className="px-4 pt-3 pb-2 border-b border-[#E5E7EB] bg-gradient-to-r from-[#F9FAFB] to-white">
+          <div className="space-y-2">
+            {userMemory && userMemory.length > 0 && (
+              <div className="flex items-start gap-2 text-xs">
+                <Lightbulb className="w-3.5 h-3.5 text-[#4F46E5] mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  {userMemory.find(m => m.memory_key === 'preferred_style') && (
+                    <p className="text-[#6B7280]">
+                      <span className="font-medium text-[#374151]">Style:</span> {userMemory.find(m => m.memory_key === 'preferred_style')?.memory_value}
+                    </p>
+                  )}
+                  {userMemory.find(m => m.memory_key === 'struggling_topic') && (
+                    <p className="text-[#6B7280]">
+                      <span className="font-medium text-[#374151]">Focusing on:</span> {userMemory.find(m => m.memory_key === 'struggling_topic')?.memory_value}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+            {weakTopics && weakTopics.length > 0 && (
+              <div className="flex items-start gap-2 text-xs">
+                <Target className="w-3.5 h-3.5 text-[#F59E0B] mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-[#6B7280]">
+                    <span className="font-medium text-[#374151]">Weak topics:</span> {weakTopics.join(', ')}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {displayMessages.map(renderMessage)}
@@ -347,8 +438,18 @@ export function AIAssistant({
 
       {/* Error display */}
       {chatError && (
-        <div className="px-4 py-2 bg-red-50 border-t border-red-200">
-          <p className="text-xs text-red-600">{chatError}</p>
+        <div className="px-4 py-2 border-t border-[#E5E7EB]">
+          <ErrorDisplay
+            error={chatError}
+            onRetry={() => {
+              // Clear error and allow user to retry
+              if (inputValue.trim()) {
+                handleSend()
+              }
+            }}
+            title="Chat Error"
+            className="mb-0"
+          />
         </div>
       )}
 
@@ -361,12 +462,12 @@ export function AIAssistant({
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyPress}
             placeholder={getPlaceholder()}
-            disabled={isSending || isLoading}
+            disabled={isActuallySending}
             className="flex-1 px-4 py-3 border border-[#E5E7EB] rounded-[12px] text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
           />
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim() || isSending || isLoading}
+            disabled={!inputValue.trim() || isActuallySending}
             className="w-12 h-12 bg-[#4F46E5] text-white rounded-[12px] flex items-center justify-center hover:bg-[#4338CA] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSending ? (
@@ -381,7 +482,7 @@ export function AIAssistant({
             <button
               key={idx}
               onClick={() => setInputValue(prompt.text)}
-              disabled={isSending || isLoading}
+              disabled={isActuallySending}
               className="text-xs px-3 py-1.5 bg-[#F9FAFB] border border-[#E5E7EB] rounded-full hover:bg-[#F3F4F6] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {prompt.icon} {prompt.text}

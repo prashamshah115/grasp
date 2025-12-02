@@ -6,7 +6,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { triggerFinalPackGeneration } from '@/lib/api';
+import { 
+  triggerFinalPackGeneration,
+  triggerPersonalizedStudyPackGeneration,
+  fetchStudyPlan,
+  fetchStudyPlans,
+  triggerStudyPlanGeneration,
+  updateStudyPlanProgress,
+  archiveStudyPlan,
+} from '@/lib/api';
 
 // Types
 export interface FinalsDashboardData {
@@ -67,14 +75,22 @@ export function useFinalsDashboard() {
         .rpc('get_finals_dashboard', { target_user_id: user.id });
 
       if (error) {
-        console.error('Error fetching finals dashboard:', error);
-        throw error;
+        // Handle 404 (RPC function doesn't exist) gracefully
+        const is404 = error.code === 'PGRST301' || error.code === 'PGRST116' || (error as any).status === 404 || (error as any).code === '42883';
+        if (is404) {
+          console.debug('Finals dashboard RPC not available, returning empty data');
+          return [];
+        }
+        // For other errors, log but don't throw - return empty array
+        console.warn('Error fetching finals dashboard (non-critical):', error);
+        return [];
       }
 
       return data || [];
     },
     enabled: !!user?.id,
     staleTime: 1000 * 60 * 5, // 5 minutes
+    retry: false, // Don't retry on 404
   });
 }
 
@@ -94,7 +110,7 @@ export function useUserFinalPreferences(courseId: string | undefined) {
         .select('*')
         .eq('user_id', user.id)
         .eq('course_id', courseId)
-        .single();
+        .maybeSingle(); // Use maybeSingle instead of single to handle 406 gracefully
 
       // Handle missing table (406) or not found (PGRST116) gracefully
       // PGRST116 = not found, 406 = table doesn't exist or RLS issue
@@ -146,7 +162,23 @@ export function useUpdateFinalPreferences() {
         .select()
         .single();
 
+      // Handle missing table gracefully (406 error)
       if (error) {
+        const isTableMissing = (error as any).status === 406 || error.message?.includes('406') || error.code === 'PGRST301';
+        if (isTableMissing) {
+          console.warn('user_final_preferences table does not exist. Preferences will not be saved.');
+          // Return a mock response so the UI doesn't break
+          return {
+            id: 'temp',
+            user_id: user.id,
+            course_id: params.courseId,
+            final_exam_date: params.finalExamDate,
+            final_exam_weight: params.finalExamWeight ?? 0.3,
+            daily_study_minutes: params.dailyStudyMinutes ?? 60,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          } as UserFinalPreferences;
+        }
         console.error('Error updating final preferences:', error);
         throw error;
       }
@@ -162,21 +194,56 @@ export function useUpdateFinalPreferences() {
 
 /**
  * Fetch final packs for a course
+ * Prioritizes personalized packs, falls back to course-level packs
  */
 export function useFinalPacks(courseId: string | undefined) {
+  const { user } = useAuth();
+  
   return useQuery({
-    queryKey: ['final-packs', courseId],
+    queryKey: ['final-packs', courseId, user?.id],
     queryFn: async (): Promise<FinalPack[]> => {
       if (!courseId) return [];
 
+      // First, try to get personalized packs for this user
+      if (user?.id) {
+        const { data: personalizedPacks, error: personalizedError } = await supabase
+          .from('final_packs')
+          .select('*')
+          .eq('course_id', courseId)
+          .eq('user_id', user.id)
+          .eq('is_personalized', true)
+          .order('tier');
+
+        if (!personalizedError && personalizedPacks && personalizedPacks.length > 0) {
+          console.log(`[useFinalPacks] Found ${personalizedPacks.length} personalized packs`);
+          return personalizedPacks;
+        }
+      }
+
+      // Fallback to course-level packs
       const { data, error } = await supabase
         .from('final_packs')
         .select('*')
         .eq('course_id', courseId)
+        .is('user_id', null) // Course-level packs have null user_id
         .order('tier');
 
       if (error) {
-        console.error('Error fetching final packs:', error);
+        // Treat missing table / RLS / not configured as "no packs yet"
+        const isTableOrRlsIssue =
+          (error as any).status === 406 ||
+          error.code === 'PGRST301' ||
+          error.code === 'PGRST116' ||
+          error.message?.includes('final_packs') ||
+          error.message?.includes('permission denied');
+
+        if (isTableOrRlsIssue) {
+          console.warn('Final packs table not available or blocked by RLS. Returning empty packs.', error);
+          return [];
+        }
+
+        // For unexpected errors, log and rethrow so React Query can surface `error`
+        console.error('Unexpected error fetching final packs:', error);
         throw error;
       }
 
@@ -226,6 +293,23 @@ export function useTriggerFinalPacks() {
     onSuccess: (_, courseId) => {
       // Invalidate final packs queries after triggering generation
       queryClient.invalidateQueries({ queryKey: ['final-packs', courseId] });
+      queryClient.invalidateQueries({ queryKey: ['final-pack', courseId] });
+    },
+  });
+}
+
+/**
+ * Trigger personalized study pack generation via Trigger.dev
+ */
+export function useTriggerPersonalizedStudyPack() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: (courseId: string) => triggerPersonalizedStudyPackGeneration(courseId),
+    onSuccess: (_, courseId) => {
+      // Invalidate final packs queries after triggering generation
+      queryClient.invalidateQueries({ queryKey: ['final-packs', courseId, user?.id] });
       queryClient.invalidateQueries({ queryKey: ['final-pack', courseId] });
     },
   });
@@ -471,6 +555,262 @@ export function useMustSolveTopics(courseId: string | undefined) {
     },
     enabled: !!courseId,
     staleTime: 1000 * 60 * 5,
+  });
+}
+
+// ==================== STUDY PLANS ====================
+
+export interface StudyPlan {
+  id: string;
+  user_id: string;
+  course_id: string;
+  title: string;
+  target_date: string;
+  daily_minutes: number;
+  plan_content: Array<{
+    day: number;
+    date: string;
+    focus_topics: string[];
+    tasks: Array<{
+      type: 'read' | 'practice' | 'review' | 'quiz' | 'rest';
+      description: string;
+      duration_minutes: number;
+      topic_id: string | null;
+      topic_name: string;
+      priority: 1 | 2 | 3;
+      completed?: boolean;
+    }>;
+    estimated_minutes: number;
+  }>;
+  weak_topics: string[];
+  priority_order: string[];
+  model_used: string;
+  generated_at: string;
+  status: 'active' | 'archived';
+  progress_percent: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Fetch active study plan for a course
+ */
+export function useStudyPlan(courseId: string | undefined) {
+  const { user } = useAuth();
+
+  return useQuery({
+    queryKey: ['study-plan', user?.id, courseId],
+    queryFn: async (): Promise<StudyPlan | null> => {
+      if (!user?.id || !courseId) return null;
+      return await fetchStudyPlan(courseId, user.id);
+    },
+    enabled: !!user?.id && !!courseId,
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+/**
+ * Fetch all study plans (including archived)
+ */
+export function useStudyPlans(courseId: string | undefined) {
+  const { user } = useAuth();
+
+  return useQuery({
+    queryKey: ['study-plans', user?.id, courseId],
+    queryFn: async (): Promise<StudyPlan[]> => {
+      if (!user?.id || !courseId) return [];
+      return await fetchStudyPlans(courseId, user.id);
+    },
+    enabled: !!user?.id && !!courseId,
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+// ==================== DIAGNOSTIC & FINALS FLOW ====================
+
+export type FinalsFlowStep = 'NEED_EXAM_DATE' | 'NEED_DIAGNOSTIC' | 'READY';
+
+interface DiagnosticStatusResult {
+  hasCompletedDiagnostic: boolean;
+  score: number | null;
+  completedAt: string | null;
+}
+
+/**
+ * Fetch diagnostic completion status for a user and course.
+ */
+export function useDiagnosticStatus(courseId: string | undefined) {
+  const { user } = useAuth();
+
+  return useQuery({
+    queryKey: ['diagnostic-status', user?.id, courseId],
+    queryFn: async (): Promise<DiagnosticStatusResult> => {
+      if (!user?.id || !courseId) {
+        return {
+          hasCompletedDiagnostic: false,
+          score: null,
+          completedAt: null,
+        };
+      }
+
+      const { data, error } = await supabase
+        .from('diagnostic_status')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('course_id', courseId)
+        .maybeSingle();
+
+      if (error) {
+        // Treat missing table / function / RLS issues as \"no diagnostic yet\"
+        const isTableOrRlsIssue =
+          (error as any).status === 406 ||
+          error.code === 'PGRST301' ||
+          error.code === 'PGRST116' ||
+          error.message?.includes('diagnostic_status') ||
+          error.message?.includes('permission denied');
+
+        if (!isTableOrRlsIssue) {
+          console.warn('Error fetching diagnostic_status (non-fatal):', error);
+        }
+
+        return {
+          hasCompletedDiagnostic: false,
+          score: null,
+          completedAt: null,
+        };
+      }
+
+      return {
+        hasCompletedDiagnostic: !!data?.completed,
+        score: data?.score ?? null,
+        completedAt: data?.completed_at ?? null,
+      };
+    },
+    enabled: !!user?.id && !!courseId,
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+/**
+ * Centralized finals flow state: decides whether we need
+ * an exam date, a diagnostic, or are ready to show the study plan.
+ */
+export function useFinalsFlow(courseId: string | undefined) {
+  const { data: preferences } = useUserFinalPreferences(courseId);
+  const { data: diagnosticStatus } = useDiagnosticStatus(courseId);
+  const { data: studyPlan } = useStudyPlan(courseId);
+
+  const hasExamDate = !!preferences?.final_exam_date;
+  const hasCompletedDiagnostic = !!diagnosticStatus?.hasCompletedDiagnostic;
+  const hasStudyPlan = !!studyPlan;
+
+  let flowStep: FinalsFlowStep = 'READY';
+
+  if (!hasExamDate) {
+    flowStep = 'NEED_EXAM_DATE';
+  } else if (!hasCompletedDiagnostic) {
+    flowStep = 'NEED_DIAGNOSTIC';
+  } else {
+    flowStep = 'READY';
+  }
+
+  return {
+    hasExamDate,
+    hasCompletedDiagnostic,
+    hasStudyPlan,
+    flowStep,
+  };
+}
+
+/**
+ * Trigger study plan generation
+ */
+export function useTriggerStudyPlan() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async (params: {
+      courseId: string;
+      options?: {
+        targetDate?: string;
+        dailyMinutes?: number;
+        focusWeakTopics?: boolean;
+      };
+    }) => {
+      if (!user?.id) throw new Error('User not authenticated');
+      return await triggerStudyPlanGeneration(
+        params.courseId,
+        user.id,
+        params.options
+      );
+    },
+    onSuccess: (_, variables) => {
+      // Invalidate study plan queries
+      queryClient.invalidateQueries({
+        queryKey: ['study-plan', user?.id, variables.courseId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['study-plans', user?.id, variables.courseId],
+      });
+    },
+  });
+}
+
+/**
+ * Update study plan progress (mark tasks as complete)
+ */
+export function useUpdateStudyPlanProgress() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async (params: {
+      planId: string;
+      taskDay: number;
+      taskIndex: number;
+      completed: boolean;
+      courseId: string;
+    }) => {
+      return await updateStudyPlanProgress(
+        params.planId,
+        params.taskDay,
+        params.taskIndex,
+        params.completed
+      );
+    },
+    onSuccess: (_, variables) => {
+      // Invalidate study plan queries
+      queryClient.invalidateQueries({
+        queryKey: ['study-plan', user?.id, variables.courseId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['study-plans', user?.id, variables.courseId],
+      });
+    },
+  });
+}
+
+/**
+ * Archive a study plan
+ */
+export function useArchiveStudyPlan() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async (params: { planId: string; courseId: string }) => {
+      return await archiveStudyPlan(params.planId);
+    },
+    onSuccess: (_, variables) => {
+      // Invalidate study plan queries
+      queryClient.invalidateQueries({
+        queryKey: ['study-plan', user?.id, variables.courseId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['study-plans', user?.id, variables.courseId],
+      });
+    },
   });
 }
 

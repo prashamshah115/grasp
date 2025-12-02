@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { safeInvoke } from '@/lib/safeInvoke'
 import { useAuth } from '@/components/auth/AuthProvider'
+import { logger } from '@/lib/logger'
 import type {
   ChatThread,
   ChatMessage,
@@ -39,21 +40,34 @@ export function useThread(topicId?: string | null, courseId?: string | null) {
   const { user } = useAuth()
   const queryClient = useQueryClient()
 
-  return useQuery({
-    queryKey: topicId ? chatKeys.threadByTopic(topicId) : ['chat', 'no-topic'],
-    queryFn: async (): Promise<ChatThread | null> => {
-      if (!user || !topicId) return null
+  // Enable query if we have user and either topicId or courseId
+  const enabled = !!user && (!!topicId || !!courseId)
 
-      // Try to find existing thread
-      const { data: existingThread, error: findError } = await supabase
+  return useQuery({
+    queryKey: topicId 
+      ? chatKeys.threadByTopic(topicId) 
+      : courseId 
+        ? ['chat', 'course', courseId] 
+        : ['chat', 'no-context'],
+    queryFn: async (): Promise<ChatThread | null> => {
+      if (!user || (!topicId && !courseId)) return null
+
+      // Build query to find existing thread
+      let query = supabase
         .from('chat_threads')
         .select('*')
         .eq('user_id', user.id)
-        .eq('topic_id', topicId)
         .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(1)
-        .maybeSingle()
+
+      if (topicId) {
+        query = query.eq('topic_id', topicId)
+      } else if (courseId) {
+        query = query.eq('course_id', courseId).is('topic_id', null)
+      }
+
+      const { data: existingThread, error: findError } = await query.maybeSingle()
 
       if (existingThread && !findError) {
         return existingThread as ChatThread
@@ -65,7 +79,7 @@ export function useThread(topicId?: string | null, courseId?: string | null) {
         .insert({
           user_id: user.id,
           course_id: courseId || null,
-          topic_id: topicId,
+          topic_id: topicId || null,
           model: 'gpt-4-turbo-preview',
         })
         .select()
@@ -78,7 +92,7 @@ export function useThread(topicId?: string | null, courseId?: string | null) {
 
       return newThread as ChatThread
     },
-    enabled: !!user && !!topicId,
+    enabled,
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 30 * 60 * 1000, // 30 minutes
   })
@@ -181,19 +195,20 @@ export function useChat(options: UseChatOptions = {}) {
   // Ref to track if we've loaded initial messages
   const initialLoadDone = useRef(false)
 
-  // Get or create thread
+  // Get or create thread (only if we have topicId or courseId)
+  // If neither is provided, thread will be created on first message by edge function
   const {
     data: thread,
     isLoading: threadLoading,
     error: threadError,
-  } = useThread(topicId, courseId)
+  } = useThread(topicId || null, courseId || null)
 
-  // Get existing messages
+  // Get existing messages (only if we have a thread)
   const {
     data: dbMessages,
     isLoading: messagesLoading,
     error: messagesError,
-  } = useThreadMessages(thread?.id)
+  } = useThreadMessages(thread?.id || null)
 
   // Sync database messages to local state
   useEffect(() => {
@@ -307,19 +322,48 @@ export function useChat(options: UseChatOptions = {}) {
         return [...prev, assistantMessage]
       })
 
-      // Update thread in cache if it was just created
+      // Update thread in cache if it was just created by edge function
       if (response.thread_id && !thread?.id) {
-        queryClient.invalidateQueries({ queryKey: chatKeys.threadByTopic(topicId!) })
+        // Invalidate thread queries to refetch with new thread_id
+        if (topicId) {
+          queryClient.invalidateQueries({ queryKey: chatKeys.threadByTopic(topicId) })
+        } else if (courseId) {
+          queryClient.invalidateQueries({ queryKey: ['chat', 'course', courseId] })
+        }
+        // Also invalidate messages to load from new thread
+        queryClient.invalidateQueries({ queryKey: chatKeys.messages(response.thread_id) })
       }
     } catch (err) {
-      console.error('[useChat] Send message error:', err)
+      logger.error('[useChat] Send message error', err, {
+        userId: user.id,
+        threadId: thread?.id,
+        topicId,
+        courseId,
+        messageLength: content.length,
+      })
       
       // Remove optimistic message on error
       setLocalMessages(prev => prev.filter(m => m.id !== optimisticUserMessage.id))
       
-      // Set error state
-      const errorMessage = err instanceof Error ? err.message : 'Failed to send message'
-      setError(errorMessage)
+      // Create user-friendly error message
+      let userFriendlyMessage = 'Sorry, I encountered an error. Please try again.'
+      if (err instanceof Error) {
+        const errMsg = err.message.toLowerCase()
+        if (errMsg.includes('rate limit') || errMsg.includes('429')) {
+          userFriendlyMessage = 'I\'m getting too many requests right now. Please wait a moment and try again.'
+        } else if (errMsg.includes('api key') || errMsg.includes('401')) {
+          userFriendlyMessage = 'There\'s a configuration issue. Please contact support if this persists.'
+        } else if (errMsg.includes('timeout') || errMsg.includes('network')) {
+          userFriendlyMessage = 'The request took too long. Please check your connection and try again.'
+        } else if (errMsg.includes('openai') || errMsg.includes('llm')) {
+          userFriendlyMessage = 'The AI service is temporarily unavailable. Please try again in a moment.'
+        } else {
+          // For other errors, show a generic but helpful message
+          userFriendlyMessage = 'Something went wrong. Please try again, or refresh the page if the issue persists.'
+        }
+      }
+      
+      setError(userFriendlyMessage)
       
       // Add error message to chat
       const errorUIMessage: UIMessage = {
@@ -327,12 +371,12 @@ export function useChat(options: UseChatOptions = {}) {
         thread_id: thread?.id || '',
         user_id: null,
         role: 'assistant',
-        content: `Sorry, I encountered an error: ${errorMessage}. Please try again.`,
+        content: userFriendlyMessage,
         token_count: null,
         model_used: null,
         raw_response: null,
         created_at: new Date().toISOString(),
-        error: errorMessage,
+        error: err instanceof Error ? err.message : 'Unknown error',
       }
       setLocalMessages(prev => [...prev, errorUIMessage])
     } finally {

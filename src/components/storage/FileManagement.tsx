@@ -87,7 +87,7 @@ export function FileManagement() {
       </div>
 
       <div className="space-y-2">
-        {files.map((file) => (
+        {files && Array.isArray(files) ? files.map((file) => (
           <div
             key={file.name}
             className="flex items-center justify-between p-4 bg-white border border-[#E5E7EB] rounded-[12px] hover:border-[#4F46E5] transition-colors"
@@ -130,7 +130,7 @@ export function FileManagement() {
               </button>
             </div>
           </div>
-        ))}
+        )) : []}
       </div>
     </div>
   )

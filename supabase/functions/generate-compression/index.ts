@@ -9,6 +9,15 @@ import {
   NotFoundError,
   isValidUUID,
 } from '../_shared/errors.ts'
+import {
+  logFunctionStart,
+  logFunctionEnd,
+  logQuery,
+  logApiCall,
+  logError,
+  logValidationError,
+  createTimer,
+} from '../_shared/logger.ts'
 
 interface CompressionRequest {
   topicId: string
@@ -20,42 +29,74 @@ interface CompressionResponse {
   sourceCount: number
 }
 
-// Helper: Call OpenAI LLM (GPT-5 Nano - Nov 2025, 200x cheaper than GPT-4 Turbo)
+// Helper: Call OpenAI LLM
 async function callLLM(systemPrompt: string, userMessage: string): Promise<string> {
   const apiKey = Deno.env.get('OPENAI_API_KEY')
-  if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'gpt-5-nano',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ],
-      temperature: 0.5, // Balanced creativity for comprehensive explanations
-      max_tokens: 3000, // Increased for comprehensive, detailed notes
-      top_p: 0.9, // Nucleus sampling for better quality
-      frequency_penalty: 0.2, // Reduce repetition in longer outputs
-      presence_penalty: 0.1 // Encourage diverse topic coverage
-    })
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`OpenAI API error: ${error}`)
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY not configured. Please set this environment variable in Supabase Edge Functions secrets.')
   }
 
-  const data = await response.json()
-  return data.choices[0].message.content
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4-turbo-preview', // Use valid OpenAI model
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        temperature: 0.5, // Balanced creativity for comprehensive explanations
+        max_tokens: 3000, // Increased for comprehensive, detailed notes
+        top_p: 0.9, // Nucleus sampling for better quality
+        frequency_penalty: 0.2, // Reduce repetition in longer outputs
+        presence_penalty: 0.1 // Encourage diverse topic coverage
+      })
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      let errMessage = `OpenAI API error: ${response.status}`
+      try {
+        const errJson = JSON.parse(errText)
+        errMessage = errJson.error?.message || errMessage
+      } catch {
+        errMessage = `${errMessage} - ${errText.substring(0, 200)}`
+      }
+      
+      // Provide helpful error messages for common issues
+      if (response.status === 401) {
+        throw new Error('OpenAI API key is invalid. Please check your OPENAI_API_KEY configuration.')
+      } else if (response.status === 429) {
+        throw new Error('OpenAI API rate limit exceeded. Please try again in a moment.')
+      } else if (response.status === 500 || response.status === 503) {
+        throw new Error('OpenAI API is temporarily unavailable. Please try again later.')
+      }
+      
+      throw new Error(errMessage)
+    }
+
+    const data = await response.json()
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('Invalid response format from OpenAI API')
+    }
+    
+    return data.choices[0].message.content
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('OpenAI')) {
+      throw error // Re-throw OpenAI-specific errors
+    }
+    throw new Error(`LLM call failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 serve(async (req) => {
   const FUNCTION_NAME = 'generate-compression'
+  const timer = createTimer(FUNCTION_NAME)
 
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -63,63 +104,91 @@ serve(async (req) => {
   }
 
   try {
-    console.log(`[${FUNCTION_NAME}] Request received:`, {
+    logFunctionStart(FUNCTION_NAME, {
       method: req.method,
       url: req.url,
-      headers: Object.fromEntries(req.headers.entries()),
     })
 
     // Authenticate user and get properly configured Supabase client
     // This uses the CORRECT Supabase v2 pattern for Edge Functions
+    timer.checkpoint('auth_start')
     const { supabase, user } = await requireAuth(req)
-    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
+    timer.checkpoint('auth_complete', { userId: user.id })
 
     // Rate limiting check
+    timer.checkpoint('rate_limit_start')
     const rateLimitResult = await checkRateLimit(user.id, RATE_LIMITS.generate_compression)
     if (!rateLimitResult.allowed) {
-      console.log(`[${FUNCTION_NAME}] Rate limit exceeded for user:`, user.id)
+      logError(FUNCTION_NAME, new Error('Rate limit exceeded'), {
+        userId: user.id,
+        remaining: rateLimitResult.remaining,
+      })
+      timer.end({ success: false, reason: 'rate_limit' })
       return rateLimitResponse(rateLimitResult)
     }
-
-    console.log(`[${FUNCTION_NAME}] Rate limit OK - remaining:`, rateLimitResult.remaining)
+    timer.checkpoint('rate_limit_ok', { remaining: rateLimitResult.remaining })
 
     // Safe JSON parsing with error handling
+    timer.checkpoint('parse_start')
     let body: CompressionRequest
     try {
       const rawBody = await req.text()
-      console.log(`[${FUNCTION_NAME}] Raw request body:`, rawBody)
       body = JSON.parse(rawBody) as CompressionRequest
-      console.log(`[${FUNCTION_NAME}] Parsed body:`, body)
+      timer.checkpoint('parse_complete', { hasTopicId: !!body.topicId })
     } catch (error) {
-      console.error(`[${FUNCTION_NAME}] JSON parse error:`, error)
+      logError(FUNCTION_NAME, error, { step: 'json_parse', userId: user.id })
+      timer.end({ success: false, reason: 'parse_error' })
       throw new ValidationError(`Invalid JSON in request body: ${error instanceof Error ? error.message : String(error)}`)
     }
 
     // Input validation
     if (!body.topicId || typeof body.topicId !== 'string') {
+      logValidationError(FUNCTION_NAME, 'topicId', body.topicId, 'topicId is required and must be a string', {
+        userId: user.id,
+      })
+      timer.end({ success: false, reason: 'validation_error' })
       throw new ValidationError('topicId is required and must be a string')
     }
 
     if (!isValidUUID(body.topicId)) {
+      logValidationError(FUNCTION_NAME, 'topicId', body.topicId, 'topicId must be a valid UUID', {
+        userId: user.id,
+      })
+      timer.end({ success: false, reason: 'validation_error' })
       throw new ValidationError('topicId must be a valid UUID')
     }
 
     const { topicId } = body
-    console.log(`[${FUNCTION_NAME}] Request:`, { userId: user.id, topicId })
+    timer.checkpoint('validation_complete', { topicId, userId: user.id })
 
     // STEP 1: Get course_id from topic
+    timer.checkpoint('fetch_topic_start')
     const { data: topic, error: topicError } = await supabase
       .from('topics')
       .select('course_id')
       .eq('id', topicId)
       .single()
 
+    logQuery(FUNCTION_NAME, 'fetch_topic', {
+      count: topic ? 1 : 0,
+      error: topicError,
+    }, {
+      userId: user.id,
+      topicId,
+    })
+
     if (topicError || !topic) {
+      logError(FUNCTION_NAME, topicError || new Error('Topic not found'), {
+        step: 'fetch_topic',
+        userId: user.id,
+        topicId,
+      })
+      timer.end({ success: false, reason: 'topic_not_found' })
       throw new NotFoundError('Topic not found')
     }
 
     const courseId = topic.course_id
-    console.log(`[${FUNCTION_NAME}] Found course_id: ${courseId} for topic ${topicId}`)
+    timer.checkpoint('fetch_topic_complete', { courseId })
 
     // Check if user is enrolled in the course
     const { data: enrollment } = await supabase
@@ -197,11 +266,38 @@ serve(async (req) => {
       throw pagesError
     }
     
+    logQuery(FUNCTION_NAME, 'fetch_document_pages', {
+      count: pages?.length || 0,
+      error: pagesError,
+    }, {
+      userId: user.id,
+      topicId,
+      courseId,
+    })
+
+    if (pagesError) {
+      logError(FUNCTION_NAME, pagesError, {
+        step: 'fetch_pages',
+        userId: user.id,
+        topicId,
+        courseId,
+      })
+      timer.end({ success: false, reason: 'pages_error' })
+      throw pagesError
+    }
+    
     if (!pages || pages.length === 0) {
+      logError(FUNCTION_NAME, new Error('No documents found'), {
+        step: 'fetch_pages',
+        userId: user.id,
+        topicId,
+        courseId,
+      })
+      timer.end({ success: false, reason: 'no_documents' })
       throw new NotFoundError('No documents found for this topic or course. Upload course materials first.')
     }
 
-    console.log(`[${FUNCTION_NAME}] Found ${pages.length} pages`)
+    timer.checkpoint('fetch_pages_complete', { pageCount: pages.length })
 
     // STEP 2: Fetch questions for context
     const { data: questions } = await supabase
@@ -357,10 +453,30 @@ SOURCE MATERIAL:
 ${content}`
 
     // STEP 5: Generate via LLM
-    console.log('[generate-compression] Calling LLM…')
-    const llmStartTime = Date.now()
-    const compressionContent = await callLLM(systemPrompt, 'Generate the compression notes.')
-    const llmDuration = Date.now() - llmStartTime
+    timer.checkpoint('llm_start')
+    let compressionContent: string
+    try {
+      const llmStartTime = Date.now()
+      compressionContent = await callLLM(systemPrompt, 'Generate the compression notes.')
+      const llmDuration = Date.now() - llmStartTime
+      
+      logApiCall(FUNCTION_NAME, 'callLLM', true, llmDuration, undefined, {
+        userId: user.id,
+        topicId,
+        courseId,
+        contentLength: compressionContent.length,
+      })
+      timer.checkpoint('llm_complete', { contentLength: compressionContent.length })
+    } catch (error) {
+      logError(FUNCTION_NAME, error, {
+        step: 'llm_call',
+        userId: user.id,
+        topicId,
+        courseId,
+      })
+      timer.end({ success: false, reason: 'llm_error' })
+      throw new Error(`LLM generation failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
 
     // Track LLM usage (non-blocking)
     try {

@@ -10,6 +10,7 @@ interface GenerateStudyPlanPayload {
   targetDate?: string;      // ISO date string for final exam date
   dailyMinutes?: number;    // Time budget per day (default: 60)
   focusWeakTopics?: boolean; // Prioritize weak areas (default: true)
+  jobStatusId?: string;     // Optional: ID of job_status record created by edge function
 }
 
 interface DailyTask {
@@ -276,9 +277,9 @@ async function getGraphEdges(
 ): Promise<any[]> {
   const { data: edges, error } = await supabase
     .from("course_graph_edges")
-    .select("from_object_id, to_object_id, edge_type, confidence")
+    .select("from_object_id, to_object_id, relation, confidence")
     .eq("course_id", courseId)
-    .eq("edge_type", "prerequisite");
+    .eq("relation", "prerequisite");
 
   if (error) {
     logger.warn("Failed to fetch graph edges", { error });
@@ -304,11 +305,49 @@ export const generateStudyPlan = task({
     maxTimeoutInMs: 60000,
     randomize: true,
   },
-  catchError: async ({ error }) => {
+  catchError: async ({ error, ctx }) => {
+    // Update job status to failed on error
+    try {
+      const supabase = createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+      const runId = ctx?.run?.id;
+      
+      if (runId) {
+        const { data: jobStatus } = await supabase
+          .from('job_status')
+          .select('id')
+          .eq('trigger_job_id', runId)
+          .eq('job_type', 'study_plan')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (jobStatus) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          await supabase
+            .from('job_status')
+            .update({
+              status: 'failed',
+              error_message: errorMessage,
+              completed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', jobStatus.id);
+        }
+      }
+    } catch (updateError) {
+      logger.warn('Failed to update job_status on error', { error: updateError });
+    }
+
     const errorMessage = error instanceof Error ? error.message : String(error);
     
     if (errorMessage.includes("Course not found") || errorMessage.includes("User not found")) {
       throw new AbortTaskRunError("Course or user does not exist");
+    }
+    if (errorMessage.includes("Prerequisites not met")) {
+      throw new AbortTaskRunError("Prerequisites not met for study plan generation");
     }
     if (errorMessage.includes("SUPABASE_URL")) {
       throw new AbortTaskRunError("Missing required environment variables");
@@ -316,13 +355,14 @@ export const generateStudyPlan = task({
     
     return undefined;
   },
-  run: async (payload: GenerateStudyPlanPayload) => {
+  run: async (payload: GenerateStudyPlanPayload, { ctx }) => {
     const { 
       userId, 
       courseId, 
       targetDate,
       dailyMinutes = 60,
-      focusWeakTopics = true
+      focusWeakTopics = true,
+      jobStatusId
     } = payload;
     
     logger.info(`[generate-study-plan] Starting for user ${userId}, course ${courseId}`);
@@ -339,6 +379,102 @@ export const generateStudyPlan = task({
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
+    // Get run ID for job status tracking
+    const runId = ctx?.run?.id;
+
+    // Helper function to update job status
+    const updateJobStatus = async (
+      status: 'running' | 'completed' | 'failed',
+      progress?: number,
+      errorMessage?: string,
+      metadata?: Record<string, any>
+    ) => {
+      try {
+        // Find job_status record (by ID if provided, or by course_id + job_type + user_id + latest)
+        let jobStatusRecord;
+        if (jobStatusId) {
+          const { data } = await supabase
+            .from('job_status')
+            .select('id')
+            .eq('id', jobStatusId)
+            .single();
+          jobStatusRecord = data;
+        } else if (runId) {
+          // Try to find by trigger_job_id
+          const { data } = await supabase
+            .from('job_status')
+            .select('id')
+            .eq('trigger_job_id', runId)
+            .eq('job_type', 'study_plan')
+            .eq('course_id', courseId)
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          jobStatusRecord = data;
+        }
+
+        if (jobStatusRecord) {
+          const updateData: any = {
+            status,
+            updated_at: new Date().toISOString(),
+          };
+          if (progress !== undefined) updateData.progress_percent = progress;
+          if (errorMessage) updateData.error_message = errorMessage;
+          if (status === 'completed' || status === 'failed') {
+            updateData.completed_at = new Date().toISOString();
+          }
+          if (metadata) updateData.metadata = metadata;
+          if (runId && !jobStatusRecord.trigger_job_id) {
+            updateData.trigger_job_id = runId;
+          }
+
+          await supabase
+            .from('job_status')
+            .update(updateData)
+            .eq('id', jobStatusRecord.id);
+        } else if (runId && status === 'running') {
+          // Create job_status record if it doesn't exist
+          await supabase.from('job_status').insert({
+            job_type: 'study_plan',
+            course_id: courseId,
+            user_id: userId,
+            trigger_job_id: runId,
+            status: 'running',
+            progress_percent: progress || 0,
+            metadata: metadata || {},
+          });
+        }
+      } catch (error) {
+        logger.warn('Failed to update job_status', { error });
+      }
+    };
+
+    // Check prerequisites
+    try {
+      const { data: prereqData, error: prereqError } = await supabase
+        .rpc('check_study_plan_prerequisites', { 
+          p_user_id: userId,
+          p_course_id: courseId 
+        });
+
+      if (prereqError) {
+        logger.warn('Failed to check prerequisites', { error: prereqError });
+      } else if (prereqData && !prereqData.can_generate) {
+        const errorMsg = `Prerequisites not met: ${(prereqData.missing_items || []).join(', ')}. Please add topics to the course.`;
+        logger.warn(errorMsg);
+        metadata.set("stage", "prerequisites_not_met");
+        await updateJobStatus('failed', 0, errorMsg);
+        throw new AbortTaskRunError(errorMsg);
+      }
+    } catch (error) {
+      if (error instanceof AbortTaskRunError) throw error;
+      logger.warn('Prerequisites check failed, continuing anyway', { error });
+    }
+
+    // Update job status to running
+    await updateJobStatus('running', 0);
+
     // Get course and topics
     metadata.set("stage", "fetching_data");
     const { course, topics } = await getCourseWithTopics(supabase, courseId);
@@ -349,6 +485,11 @@ export const generateStudyPlan = task({
       .set("topicCount", topics.length)
       .set("progress", 20);
 
+    await updateJobStatus('running', 20, undefined, {
+      courseCode: course.code,
+      topicCount: topics.length,
+    });
+
     // Get user's current mastery levels
     const mastery = await getUserMastery(supabase, userId, courseId);
     logger.info(`Found ${mastery.length} mastery records for user`);
@@ -358,6 +499,10 @@ export const generateStudyPlan = task({
     const edges = await getGraphEdges(supabase, courseId);
     logger.info(`Found ${edges.length} prerequisite edges`);
     metadata.set("graphEdges", edges.length).set("progress", 40);
+    await updateJobStatus('running', 40, undefined, {
+      masteryRecords: mastery.length,
+      graphEdges: edges.length,
+    });
 
     // Calculate days until target
     const now = new Date();
@@ -422,6 +567,7 @@ export const generateStudyPlan = task({
     });
     
     metadata.set("progress", 70);
+    await updateJobStatus('running', 70);
 
     // Parse LLM response
     let parsed: StudyPlanLLMResponse;
@@ -445,6 +591,9 @@ export const generateStudyPlan = task({
 
     logger.info(`Generated ${parsed.daily_plan.length}-day study plan`);
     metadata.set("planDays", parsed.daily_plan.length).set("progress", 85);
+    await updateJobStatus('running', 85, undefined, {
+      planDays: parsed.daily_plan.length,
+    });
 
     // Archive any existing active plan for this user/course
     metadata.set("stage", "database_update");
@@ -483,6 +632,7 @@ export const generateStudyPlan = task({
 
     if (insertError) {
       logger.error("Failed to insert study plan", { error: insertError });
+      await updateJobStatus('failed', 85, `Database error: ${insertError.message}`);
       throw new Error(`Failed to save study plan: ${insertError.message}`);
     }
 
@@ -501,6 +651,8 @@ export const generateStudyPlan = task({
       .set("stage", "completed")
       .set("progress", 100)
       .set("stats", stats);
+
+    await updateJobStatus('completed', 100, undefined, stats);
 
     logger.info(`[generate-study-plan] Completed`, stats);
 

@@ -14,6 +14,7 @@ import { useCourses, useAdminCourses, useUserCourses, useAddCourse, useCreateCou
 import LoadingScreen from './LoadingScreen';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useState } from 'react';
+import { ErrorBoundary } from './errors/ErrorBoundary';
 import type { Course } from '@/types/course';
 
 // Type for user course with course details
@@ -35,6 +36,9 @@ export function CourseCatalog() {
   const [newCourseCode, setNewCourseCode] = useState('');
   const [newCourseName, setNewCourseName] = useState('');
   const [newCourseTerm, setNewCourseTerm] = useState('');
+  const [enrollingCourseId, setEnrollingCourseId] = useState<string | null>(null)
+  const [enrollmentError, setEnrollmentError] = useState<string | null>(null)
+  const [createCourseError, setCreateCourseError] = useState<string | null>(null)
 
   const isLoading = coursesLoading || adminCoursesLoading || userCoursesLoading;
 
@@ -67,43 +71,82 @@ export function CourseCatalog() {
 
   const handleAddCourse = async (courseId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     
-    // Optimistic UI: disable button immediately
-    const button = e.currentTarget as HTMLButtonElement;
-    const originalText = button.textContent;
-    button.disabled = true;
-    button.textContent = 'Enrolling...';
+    if (enrollingCourseId === courseId) return; // Already enrolling
+    
+    setEnrollingCourseId(courseId);
+    setEnrollmentError(null);
     
     try {
       await addCourse.mutateAsync(courseId);
-      // Success - button will be disabled by "Already enrolled" state
+      // Success - React Query will invalidate queries and update UI automatically
+      
+      // Auto-trigger final pack generation for new enrollment
+      // This happens in the background, user doesn't need to wait
+      // Use setTimeout to avoid blocking the UI update
+      setTimeout(async () => {
+        try {
+          const { triggerFinalPackGeneration } = await import('@/lib/api');
+          await triggerFinalPackGeneration(courseId);
+          console.log('[CourseCatalog] Auto-triggered final pack generation for course:', courseId);
+        } catch (packError) {
+          // Non-blocking - if final pack generation fails, just log it
+          // User can manually trigger later from the final pack view
+          console.warn('[CourseCatalog] Failed to auto-trigger final pack generation:', packError);
+        }
+      }, 500); // Small delay to ensure enrollment is fully processed
     } catch (error: any) {
+      console.error('[CourseCatalog] Failed to add course:', error);
+      
       // Handle duplicate enrollment gracefully
       if (error?.code === '23505' || 
-          error?.message?.includes('duplicate') || 
-          error?.message?.includes('unique')) {
-        // Already enrolled - this is fine, just show success state
-        console.log('Already enrolled in course');
+          error?.message?.toLowerCase().includes('duplicate') || 
+          error?.message?.toLowerCase().includes('unique') ||
+          error?.message?.toLowerCase().includes('already enrolled')) {
+        // Already enrolled - this is fine, just log it
+        console.log('[CourseCatalog] Already enrolled in course:', courseId);
+        // Invalidate queries to refresh enrolled courses list
+        // React Query will handle this automatically via the mutation
       } else {
-        console.error('Failed to add course:', error);
-        // Restore button on error
-        button.disabled = false;
-        button.textContent = originalText;
-        alert('Failed to enroll in course. Please try again.');
+        // Show error to user
+        const errorMsg = error?.message || 'Failed to enroll in course. Please try again.';
+        setEnrollmentError(errorMsg);
+        
+        // Clear error after 5 seconds
+        setTimeout(() => setEnrollmentError(null), 5000);
       }
+    } finally {
+      setEnrollingCourseId(null);
     }
   };
 
   const handleCreateCourse = async () => {
-    if (!newCourseCode.trim() || !newCourseName.trim()) {
-      alert('Please enter both course code and name');
+    // Validate inputs
+    const code = newCourseCode.trim();
+    const name = newCourseName.trim();
+    
+    if (!code || !name) {
+      setCreateCourseError('Please enter both course code and name');
       return;
     }
 
+    if (code.length > 20) {
+      setCreateCourseError('Course code must be 20 characters or less');
+      return;
+    }
+
+    if (name.length > 200) {
+      setCreateCourseError('Course name must be 200 characters or less');
+      return;
+    }
+
+    setCreateCourseError(null);
+
     try {
       const course = await createCourseMutation.mutateAsync({
-        code: newCourseCode.trim(),
-        name: newCourseName.trim(),
+        code: code.toUpperCase(),
+        name: name,
         term: newCourseTerm.trim() || undefined,
       });
       
@@ -112,12 +155,26 @@ export function CourseCatalog() {
       setNewCourseCode('');
       setNewCourseName('');
       setNewCourseTerm('');
+      setCreateCourseError(null);
       
       // Navigate to the new course
       navigate(`/course/${course.id}`);
     } catch (error: any) {
-      console.error('Failed to create course:', error);
-      alert(`Failed to create course: ${error.message || 'Please try again.'}`);
+      console.error('[CourseCatalog] Failed to create course:', error);
+      
+      // Provide user-friendly error message
+      let errorMessage = 'Failed to create course. Please try again.';
+      if (error?.message) {
+        if (error.message.includes('duplicate') || error.message.includes('unique')) {
+          errorMessage = 'A course with this code already exists. Please use a different code.';
+        } else if (error.message.includes('validation') || error.message.includes('invalid')) {
+          errorMessage = 'Invalid course information. Please check your inputs and try again.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      setCreateCourseError(errorMessage);
     }
   };
 
@@ -132,7 +189,8 @@ export function CourseCatalog() {
   const displayName = user?.name?.split(' ')[0] ?? 'Your';
 
   return (
-    <div className="min-h-screen bg-white">
+    <ErrorBoundary>
+      <div className="min-h-screen bg-white">
       {/* Header */}
       <header className="px-8 py-6 border-b border-[#E5E7EB]">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -169,6 +227,19 @@ export function CourseCatalog() {
             Choose a course to begin your final prep
           </p>
         </div>
+
+        {/* Enrollment Error Display */}
+        {enrollmentError && (
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-[12px] p-4 flex items-center justify-between">
+            <p className="text-red-700 text-sm">{enrollmentError}</p>
+            <button
+              onClick={() => setEnrollmentError(null)}
+              className="text-red-700 hover:text-red-900"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Course Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -306,10 +377,10 @@ export function CourseCatalog() {
                                   e.stopPropagation();
                                   handleAddCourse(course.id, e);
                                 }}
-                                disabled={addCourse.isPending}
+                                disabled={enrollingCourseId === course.id || addCourse.isPending}
                                 className="px-4 py-2 text-sm font-medium bg-[#4F46E5] text-white rounded-[8px] hover:bg-[#4338CA] disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                               >
-                                {addCourse.isPending ? 'Enrolling...' : 'Enroll'}
+                                {enrollingCourseId === course.id || addCourse.isPending ? 'Enrolling...' : 'Enroll'}
                               </button>
                             </>
                           )}
@@ -343,6 +414,12 @@ export function CourseCatalog() {
               </button>
             </div>
 
+            {createCourseError && (
+              <div className="mb-4 bg-red-50 border border-red-200 rounded-[10px] p-3">
+                <p className="text-red-700 text-sm">{createCourseError}</p>
+              </div>
+            )}
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-[#374151] mb-2">
@@ -351,7 +428,10 @@ export function CourseCatalog() {
                 <input
                   type="text"
                   value={newCourseCode}
-                  onChange={(e) => setNewCourseCode(e.target.value)}
+                  onChange={(e) => {
+                    setNewCourseCode(e.target.value);
+                    setCreateCourseError(null); // Clear error on input change
+                  }}
                   placeholder="e.g., CSE 120"
                   className="w-full px-4 py-3 border border-[#E5E7EB] rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent"
                 />
@@ -364,7 +444,10 @@ export function CourseCatalog() {
                 <input
                   type="text"
                   value={newCourseName}
-                  onChange={(e) => setNewCourseName(e.target.value)}
+                  onChange={(e) => {
+                    setNewCourseName(e.target.value);
+                    setCreateCourseError(null); // Clear error on input change
+                  }}
                   placeholder="e.g., Operating Systems"
                   className="w-full px-4 py-3 border border-[#E5E7EB] rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#4F46E5] focus:border-transparent"
                 />
@@ -391,6 +474,7 @@ export function CourseCatalog() {
                   setNewCourseCode('');
                   setNewCourseName('');
                   setNewCourseTerm('');
+                  setCreateCourseError(null);
                 }}
                 className="flex-1 px-4 py-3 border border-[#E5E7EB] text-[#374151] rounded-[10px] hover:bg-[#F9FAFB] transition-colors"
               >
@@ -407,6 +491,7 @@ export function CourseCatalog() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }

@@ -48,6 +48,7 @@ export function PracticeSession() {
   const queryClient = useQueryClient()
   const location = useLocation()
   const weakOnly = location.state?.weakOnly === true
+  const isDiagnostic = location.state?.isDiagnostic === true
 
   // ==================== STATE ====================
 
@@ -65,6 +66,7 @@ export function PracticeSession() {
     page?: number
   } | null>(null)
   const [showRelevantContent, setShowRelevantContent] = useState(false)
+  const [isEndingSession, setIsEndingSession] = useState(false)
 
   // ==================== QUERIES ====================
 
@@ -95,7 +97,7 @@ export function PracticeSession() {
     enabled: !!currentQuestion?.topic_id,
   })
 
-  // Fetch relevant content for current question
+  // Fetch relevant content for current question - fetch proactively when question is available
   const {
     data: relevantContent,
     isLoading: relevantContentLoading,
@@ -105,7 +107,7 @@ export function PracticeSession() {
     questionText: currentQuestion?.prompt,
     topicId: currentQuestion?.topic_id,
     courseId: session?.course_id,
-    enabled: showRelevantContent && !!currentQuestion,
+    enabled: !!currentQuestion, // Fetch when question is available, not just when panel opens
   })
 
   // ==================== MUTATIONS ====================
@@ -133,10 +135,10 @@ export function PracticeSession() {
 
   // Load first question on mount
   useEffect(() => {
-    if (session && !currentQuestion && session.course_id && isInitialLoad) {
+    if (session && !currentQuestion && session.course_id && isInitialLoad && user) {
       loadNextQuestion().finally(() => setIsInitialLoad(false))
     }
-  }, [session])
+  }, [session, currentQuestion, isInitialLoad, user])
 
   // ==================== HANDLERS ====================
 
@@ -150,16 +152,37 @@ export function PracticeSession() {
         weak_only: weakOnly,
       })
 
+      if (!question) {
+        // No question returned - end session gracefully
+        console.log('[PracticeSession] No questions available, ending session')
+        await handleEndSession()
+        return
+      }
+
       setCurrentQuestion(question)
       setUserAnswer('')
       setShowFeedback(false)
       setShowHint(false)
       setFeedback(null)
       setQuestionStartTime(Date.now())
-    } catch (error) {
-      console.error('Failed to load next question:', error)
-      // If no more questions available, end session
-      handleEndSession()
+    } catch (error: any) {
+      console.error('[PracticeSession] Failed to load next question:', error)
+      
+      // Check if error is due to no questions available (404 or specific error message)
+      const isNoQuestionsError = 
+        error?.status === 404 || 
+        error?.message?.toLowerCase().includes('no questions') ||
+        error?.message?.toLowerCase().includes('no more questions')
+      
+      if (isNoQuestionsError) {
+        // No more questions available - end session gracefully
+        console.log('[PracticeSession] No more questions available, ending session')
+        await handleEndSession()
+      } else {
+        // Other error - show error message but don't end session yet
+        console.error('[PracticeSession] Error loading question:', error)
+        // User can retry or exit manually
+      }
     }
   }
 
@@ -188,14 +211,26 @@ export function PracticeSession() {
         question_id: currentQuestion.id,
         is_correct: result.is_correct,
       })
-    } catch (error) {
-      console.error('Failed to submit answer:', error)
+    } catch (error: any) {
+      console.error('[PracticeSession] Failed to submit answer:', error)
+      
+      // Show user-friendly error message
+      const errorMessage = error?.message || 'Failed to submit answer. Please try again.'
+      
+      // Set error state that can be displayed to user
+      setFeedback({
+        is_correct: false,
+        explanation: `Error: ${errorMessage}. Please check your connection and try again.`,
+      } as SubmitAnswerResponse)
+      setShowFeedback(true)
     }
   }
 
   const handleNext = () => {
-    // Configurable session length (default: 10 questions)
-    const sessionLength = 10
+    // Configurable session length
+    // Diagnostic: 10-15 questions (adaptive, we'll use 12 as target)
+    // Regular practice: 10 questions
+    const sessionLength = isDiagnostic ? 12 : 10
 
     if (questionsAnswered >= sessionLength) {
       handleEndSession()
@@ -205,7 +240,9 @@ export function PracticeSession() {
   }
 
   const handleEndSession = async () => {
-    if (!session || !user) return
+    if (!session || !user || isEndingSession) return
+
+    setIsEndingSession(true)
 
     try {
       const result = await endSessionMutation.mutateAsync({
@@ -213,30 +250,89 @@ export function PracticeSession() {
       })
 
       // Update mastery after session completes
-      await updateMasteryMutation.mutateAsync({
-        session_id: session.id,
-      })
+      try {
+        await updateMasteryMutation.mutateAsync({
+          session_id: session.id,
+        })
+      } catch (masteryError) {
+        console.error('[PracticeSession] Failed to update mastery (non-critical):', masteryError)
+        // Don't block navigation on mastery update failure
+      }
 
-      // Trigger KSV update after mastery is updated
+      // Trigger KSV update after mastery is updated (non-blocking)
       if (session.course_id) {
-        triggerKSVUpdate.mutate(session.course_id)
+        try {
+          triggerKSVUpdate.mutate(session.course_id)
+        } catch (ksvError) {
+          console.error('[PracticeSession] Failed to trigger KSV update (non-critical):', ksvError)
+        }
+      }
+
+      // If this was a diagnostic session, mark diagnostic_status as complete
+      if (isDiagnostic && session.course_id && user) {
+        try {
+          const correctCount = result.stats?.correct_answers || 0
+          const totalQuestions = result.stats?.total_questions || questionsAnswered
+          const score = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0
+
+          const { error: statusError } = await supabase
+            .from('diagnostic_status')
+            .upsert({
+              user_id: user.id,
+              course_id: session.course_id,
+              completed: true,
+              score: score,
+              completed_at: new Date().toISOString(),
+            }, {
+              onConflict: 'user_id,course_id',
+            })
+
+          if (statusError) {
+            console.warn('[PracticeSession] Failed to update diagnostic_status:', statusError)
+          } else {
+            console.log('[PracticeSession] Diagnostic status marked as complete')
+            // Invalidate diagnostic status query so flow state updates
+            queryClient.invalidateQueries({ queryKey: ['diagnostic-status', user.id, session.course_id] })
+            queryClient.invalidateQueries({ queryKey: ['finals-flow', session.course_id] })
+          }
+        } catch (diagnosticError) {
+          console.warn('[PracticeSession] Error updating diagnostic_status:', diagnosticError)
+        }
       }
 
       // Force immediate refetch of mastery queries (course + topics)
       queryClient.invalidateQueries({ queryKey: ['mastery'] })
       queryClient.refetchQueries({ queryKey: ['mastery'] })
 
-      // Navigate to course page with success message
-      navigate(`/course/${session.course_id}/practice`, {
-        state: {
-          sessionComplete: true,
-          stats: result.stats,
-        },
-      })
+      // Navigate based on session type
+      if (isDiagnostic) {
+        // After diagnostic, navigate to course home (which will show study plan entry card if ready)
+        navigate(`/course/${session.course_id}`, {
+          state: {
+            diagnosticComplete: true,
+            stats: result.stats,
+          },
+        })
+      } else {
+        // Regular practice session - navigate to practice view
+        navigate(`/course/${session.course_id}/practice`, {
+          state: {
+            sessionComplete: true,
+            stats: result.stats,
+          },
+        })
+      }
     } catch (error) {
-      console.error('Failed to end session:', error)
-      // Still navigate back on error
-      navigate(`/course/${session.course_id}/practice`)
+      console.error('[PracticeSession] Failed to end session:', error)
+      setIsEndingSession(false)
+      // Still navigate back on error, but allow retry
+      if (confirm('Failed to end session. Would you like to try again or return to practice?')) {
+        // User wants to retry
+        handleEndSession()
+      } else {
+        // User wants to navigate back
+        navigate(`/course/${session.course_id}/practice`)
+      }
     }
   }
 
@@ -270,6 +366,35 @@ export function PracticeSession() {
       }
     }
     setShowHint(!showHint)
+  }
+
+  const handleOpenPdf = async (documentId: string, title: string, page?: number) => {
+    try {
+      // Get document from source documents
+      const doc = sourceDocuments?.find(d => d && d.id === documentId)
+      if (!doc) {
+        console.error('[PracticeSession] Document not found:', documentId)
+        return
+      }
+
+      // Get public URL for document
+      const { data } = supabase.storage
+        .from('course-materials')
+        .getPublicUrl(doc.storage_path || doc.file_path || '')
+
+      if (!data?.publicUrl) {
+        console.error('[PracticeSession] Failed to get public URL for document:', documentId)
+        return
+      }
+
+      setSelectedPdf({
+        url: data.publicUrl,
+        title: title || doc.title || 'Document',
+        page,
+      })
+    } catch (error) {
+      console.error('[PracticeSession] Failed to open PDF:', error)
+    }
   }
 
   // ==================== LOADING & ERROR STATES ====================
@@ -345,12 +470,13 @@ export function PracticeSession() {
 
   // ==================== SESSION INFO ====================
 
-  const sessionLength = 10 // Configurable
+  // Session length: diagnostic uses 12 questions (adaptive 10-15), regular uses 10
+  const sessionLength = isDiagnostic ? 12 : 10
   const courseInfo = session.courses as any
   const topicInfo = session.topics as any
 
   const modeTitles = {
-    'practice': 'Topic Practice',
+    'practice': isDiagnostic ? 'Diagnostic Test' : 'Topic Practice',
     'global': 'Global Practice',
     'compression': 'Compression Practice',
     'exam': 'Exam Practice'
@@ -373,10 +499,17 @@ export function PracticeSession() {
             <span>Exit</span>
           </button>
           <div className="flex items-center gap-8">
-            <span className="text-sm text-[#6B7280]">
-              {courseInfo?.name || modeTitle}
-              {topicInfo?.name && ` • ${topicInfo.name}`}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-[#6B7280]">
+                {courseInfo?.name || modeTitle}
+                {topicInfo?.name && ` • ${topicInfo.name}`}
+              </span>
+              {isDiagnostic && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[#DBEAFE] text-[#2563EB]">
+                  Diagnostic
+                </span>
+              )}
+            </div>
             <span className="text-sm text-[#6B7280]">
               Question {questionsAnswered + 1} of {sessionLength}
             </span>
@@ -475,7 +608,7 @@ export function PracticeSession() {
             <div className="flex items-center gap-3 mt-4">
               <button
                 onClick={handleSubmit}
-                disabled={!userAnswer.trim() || submitAnswerMutation.isLoading}
+                disabled={(!userAnswer || (typeof userAnswer === 'string' && !userAnswer.trim())) || submitAnswerMutation.isLoading}
                 className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-8 py-3 rounded-[12px] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {submitAnswerMutation.isLoading && (
@@ -608,25 +741,32 @@ export function PracticeSession() {
           <div className="relative bg-white rounded-[16px] p-8 max-w-2xl w-full mx-4 shadow-2xl">
             <h3 className="text-xl font-semibold mb-6">Source Materials</h3>
             <div className="space-y-3 max-h-96 overflow-y-auto">
-              {sourceDocuments.map((doc) => (
-                <button
-                  key={doc.id}
-                  onClick={() => handleOpenPdf(doc.id, doc.title)}
-                  className="w-full flex items-center gap-4 p-4 border border-[#E5E7EB] rounded-[12px] hover:border-[#4F46E5] hover:bg-[#F9FAFB] transition-all text-left"
-                >
-                  <div className="flex-shrink-0 w-12 h-12 rounded-[10px] bg-[#FEE2E2] flex items-center justify-center">
-                    <BookOpen className="w-6 h-6 text-[#EF4444]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-[#111827] truncate mb-1">
-                      {doc.title}
+              {sourceDocuments && Array.isArray(sourceDocuments) && sourceDocuments.length > 0 ? (
+                sourceDocuments.map((doc) => (
+                  <button
+                    key={doc.id}
+                    onClick={() => handleOpenPdf(doc.id, doc.title || 'Document')}
+                    className="w-full flex items-center gap-4 p-4 border border-[#E5E7EB] rounded-[12px] hover:border-[#4F46E5] hover:bg-[#F9FAFB] transition-all text-left"
+                  >
+                    <div className="flex-shrink-0 w-12 h-12 rounded-[10px] bg-[#FEE2E2] flex items-center justify-center">
+                      <BookOpen className="w-6 h-6 text-[#EF4444]" />
                     </div>
-                    <div className="text-sm text-[#6B7280]">
-                      {doc.doc_type} • {doc.total_pages || '?'} pages
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[#111827] truncate mb-1">
+                        {doc.title || 'Untitled Document'}
+                      </div>
+                      <div className="text-sm text-[#6B7280]">
+                        {doc.doc_type || 'Document'} • {doc.total_pages || '?'} pages
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                ))
+              ) : (
+                <div className="text-center py-8 text-[#6B7280]">
+                  <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>No source materials available for this topic.</p>
+                </div>
+              )}
             </div>
             <button
               onClick={() => setShowSourceMaterials(false)}
@@ -673,6 +813,7 @@ export function PracticeSession() {
         <AIAssistant 
           context={currentQuestion.prompt}
           questionId={currentQuestion.id}
+          topicId={currentQuestion.topic_id}
           courseId={session.course_id}
           mode="practice"
           placeholder="Ask about this question..."

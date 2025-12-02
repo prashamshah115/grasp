@@ -1,6 +1,7 @@
 import { useAuth } from '@/components/auth/AuthProvider'
+import { ErrorBoundary } from '@/components/errors/ErrorBoundary'
 
-export function LandingPage() {
+function LandingPageContent() {
   const { openAuthModal } = useAuth()
 
   return (
@@ -47,5 +48,13 @@ export function LandingPage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export function LandingPage() {
+  return (
+    <ErrorBoundary>
+      <LandingPageContent />
+    </ErrorBoundary>
   );
 }

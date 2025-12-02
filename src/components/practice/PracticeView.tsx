@@ -19,6 +19,7 @@ import { useCourse, useTopics, useCourseMastery, useStartSession } from '@/hooks
 import { useAuth } from '@/components/auth/AuthProvider'
 import LoadingScreen from '../LoadingScreen'
 import { AIAssistant } from '../shared/AIAssistant'
+import { ErrorBoundary } from '../errors/ErrorBoundary'
 
 export function PracticeView() {
   const { courseId } = useParams<{ courseId: string }>()
@@ -72,9 +73,19 @@ export function PracticeView() {
     mode: 'practice' | 'global' | any = 'global',
     weakOnly: boolean = false
   ) => {
-    if (!user) return
+    if (!user || !courseId) {
+      setStartError('Please sign in and select a course')
+      return
+    }
+
+    // Prevent multiple clicks
+    if (startSession.isPending) {
+      return
+    }
 
     try {
+      setStartError(null) // Clear any previous errors
+      
       // If a React SyntheticEvent was passed (because onClick used direct reference),
       // normalize mode to 'global'
       const normalizedMode: 'practice' | 'global' =
@@ -82,22 +93,33 @@ export function PracticeView() {
 
       const session = await startSession.mutateAsync({
         user_id: user.id,
-        course_id: courseId!,
+        course_id: courseId,
         mode: normalizedMode,
       })
-      // Navigate with weakOnly flag in route state
-      navigate(`/session/${session.id}`, { state: { weakOnly } })
+
+      // Ensure session ID exists before navigating
+      if (!session?.id) {
+        throw new Error('Session created but no ID returned')
+      }
+
+      // Navigate with weakOnly flag in route state - use replace to avoid back button issues
+      navigate(`/session/${session.id}`, { 
+        state: { weakOnly },
+        replace: false 
+      })
     } catch (error) {
       console.error('Failed to start session:', error)
       // Surface error to user
-      setStartError(
-        error instanceof Error ? error.message : 'Failed to start session'
-      )
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Failed to start session. Please try again.'
+      setStartError(errorMessage)
     }
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <ErrorBoundary>
+      <div className="flex-1 overflow-y-auto">
       <div className="max-w-4xl mx-auto px-8 py-12">
         {/* Header */}
         <div className="mb-12">
@@ -191,6 +213,7 @@ export function PracticeView() {
         courseId={courseId!}
         mode="practice"
       />
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }

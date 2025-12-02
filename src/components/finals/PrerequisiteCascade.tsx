@@ -53,9 +53,47 @@ export function PrerequisiteCascade({ courseId, topicId }: PrerequisiteCascadePr
       .slice(0, 5) || [];
   }, [ksvData]);
 
+  // Fetch compression notes for all topics in course
+  const { data: allCompressionNotes } = useQuery({
+    queryKey: ['compression-notes', courseId, user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from('compression_notes')
+        .select('topic_id')
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user?.id && !!courseId,
+  });
+
+  // Fetch questions count for all topics in course
+  const { data: questionsByTopic } = useQuery({
+    queryKey: ['questions-by-topic', courseId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('questions')
+        .select('topic_id')
+        .eq('course_id', courseId)
+        .eq('is_exam_only', false);
+      if (error) throw error;
+      
+      // Count questions per topic
+      const counts = new Map<string, number>();
+      (data || []).forEach(q => {
+        if (q.topic_id) {
+          counts.set(q.topic_id, (counts.get(q.topic_id) || 0) + 1);
+        }
+      });
+      return counts;
+    },
+    enabled: !!courseId,
+  });
+
   // Build prerequisite chains for weak topics
   const { isLoading: chainsLoading } = useQuery({
-    queryKey: ['prerequisite-chains', courseId, selectedWeakTopic],
+    queryKey: ['prerequisite-chains', courseId, selectedWeakTopic, allCompressionNotes, questionsByTopic],
     queryFn: async (): Promise<PrerequisiteChain[]> => {
       if (!selectedWeakTopic || !graphEdges || !ksvData) return [];
 
@@ -78,6 +116,11 @@ export function PrerequisiteCascade({ courseId, topicId }: PrerequisiteCascadePr
         topicNames.set(ksv.topic_id, ksv.topic_name || 'Unknown');
       }
 
+      // Create sets for quick lookup
+      const compressionNoteTopicIds = new Set(
+        (allCompressionNotes || []).map(n => n.topic_id)
+      );
+
       // Traverse backwards from weak topic to find prerequisite chain
       const chain: PrerequisiteChain[] = [];
       const visited = new Set<string>();
@@ -87,13 +130,20 @@ export function PrerequisiteCascade({ courseId, topicId }: PrerequisiteCascadePr
         visited.add(topicId);
 
         const ksv = ksvData.find(k => k.topic_id === topicId);
+        
+        // Check if compression notes exist for this topic
+        const hasCompressionNotes = compressionNoteTopicIds.has(topicId);
+        
+        // Check if questions exist for this topic
+        const hasQuestions = (questionsByTopic?.get(topicId) || 0) > 0;
+        
         chain.push({
           topic_id: topicId,
           topic_name: topicNames.get(topicId) || 'Unknown',
           level,
           knowledge_strength: ksv?.knowledge_strength || 0,
-          hasCompressionNotes: false, // TODO: Check if compression notes exist
-          hasQuestions: false, // TODO: Check if questions exist
+          hasCompressionNotes,
+          hasQuestions,
         });
 
         const prereqs = prereqMap.get(topicId) || [];
@@ -107,7 +157,7 @@ export function PrerequisiteCascade({ courseId, topicId }: PrerequisiteCascadePr
       // Sort by level (deepest prerequisites first)
       return chain.sort((a, b) => b.level - a.level);
     },
-    enabled: !!selectedWeakTopic && !!graphEdges && !!ksvData,
+    enabled: !!selectedWeakTopic && !!graphEdges && !!ksvData && !!allCompressionNotes && !!questionsByTopic,
     onSuccess: (data) => {
       if (selectedWeakTopic) {
         setPrerequisiteChains(prev => ({ ...prev, [selectedWeakTopic]: data }));

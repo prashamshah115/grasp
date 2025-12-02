@@ -1,199 +1,204 @@
 /**
- * Production-Grade Logging Utility
+ * Centralized Logging Service
  * 
- * Provides structured logging with:
- * - Log levels (debug, info, warn, error)
- * - Contextual information (user, component, action)
- * - Error tracking with stack traces
- * - Performance monitoring
- * - Production-safe (filters sensitive data)
+ * Provides structured logging with context, levels, and error tracking.
+ * Designed for production-grade observability.
+ * 
+ * Usage:
+ *   import { logger } from '@/lib/logger'
+ *   logger.info('User action', { userId, action: 'click' })
+ *   logger.error('API call failed', { error, functionName: 'rag-chat' })
  */
 
-type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
 
 interface LogContext {
   userId?: string
+  courseId?: string
+  topicId?: string
+  functionName?: string
   component?: string
-  action?: string
-  metadata?: Record<string, any>
+  [key: string]: any
 }
 
 interface LogEntry {
   level: LogLevel
   message: string
+  context: LogContext
   timestamp: string
-  context?: LogContext
-  error?: {
-    name: string
-    message: string
-    stack?: string
-  }
-  duration?: number
+  userAgent?: string
+  url?: string
 }
 
 class Logger {
   private isDevelopment = import.meta.env.DEV
-  private logBuffer: LogEntry[] = []
-  private maxBufferSize = 100
+  private errorBuffer: LogEntry[] = []
+  private readonly MAX_BUFFER_SIZE = 50
 
   /**
-   * Sanitize sensitive data from logs
+   * Log a message with context
    */
-  private sanitize(data: any): any {
-    if (!data || typeof data !== 'object') return data
-
-    const sensitiveKeys = ['password', 'token', 'secret', 'key', 'authorization', 'cookie']
-    const sanitized = Array.isArray(data) ? [...data] : { ...data }
-
-    for (const key in sanitized) {
-      const lowerKey = key.toLowerCase()
-      if (sensitiveKeys.some(sk => lowerKey.includes(sk))) {
-        sanitized[key] = '[REDACTED]'
-      } else if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
-        sanitized[key] = this.sanitize(sanitized[key])
-      }
-    }
-
-    return sanitized
-  }
-
-  /**
-   * Format log entry for console output
-   */
-  private formatLog(entry: LogEntry): string {
-    const { level, message, timestamp, context, error, duration } = entry
-    const parts = [`[${timestamp}]`, level.toUpperCase(), message]
-
-    if (context?.component) parts.push(`[${context.component}]`)
-    if (context?.action) parts.push(`(${context.action})`)
-    if (duration !== undefined) parts.push(`[${duration}ms]`)
-    if (error) parts.push(`\nError: ${error.name} - ${error.message}`)
-
-    return parts.join(' ')
-  }
-
-  /**
-   * Send logs to external service (e.g., Sentry, LogRocket) in production
-   */
-  private async sendToExternalService(entry: LogEntry): Promise<void> {
-    if (this.isDevelopment) return
-
-    try {
-      // In production, send to logging service
-      // Example: await fetch('/api/logs', { method: 'POST', body: JSON.stringify(entry) })
-      
-      // For now, just store in buffer
-      this.logBuffer.push(entry)
-      if (this.logBuffer.length > this.maxBufferSize) {
-        this.logBuffer.shift()
-      }
-    } catch (err) {
-      // Silently fail - don't break app if logging fails
-      console.error('Failed to send log:', err)
-    }
-  }
-
-  /**
-   * Core logging method
-   */
-  private log(
-    level: LogLevel,
-    message: string,
-    context?: LogContext,
-    error?: Error,
-    duration?: number
-  ): void {
+  private log(level: LogLevel, message: string, context: LogContext = {}) {
     const entry: LogEntry = {
       level,
       message,
+      context: {
+        ...context,
+        // Add browser context in browser environment
+        ...(typeof window !== 'undefined' && {
+          url: window.location.href,
+          userAgent: navigator.userAgent,
+        }),
+      },
       timestamp: new Date().toISOString(),
-      context: context ? this.sanitize(context) : undefined,
-      error: error
-        ? {
-            name: error.name,
-            message: error.message,
-            stack: this.isDevelopment ? error.stack : undefined,
-          }
-        : undefined,
-      duration,
     }
 
-    // Format and output to console
-    const formatted = this.formatLog(entry)
-    const consoleMethod = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log'
-    console[consoleMethod](formatted)
-
-    if (error && this.isDevelopment) {
-      console.error('Stack trace:', error.stack)
-    }
-
-    // Send to external service in production
-    this.sendToExternalService(entry)
-  }
-
-  /**
-   * Debug logs (development only)
-   */
-  debug(message: string, context?: LogContext): void {
+    // Always log to console in development
     if (this.isDevelopment) {
-      this.log('debug', message, context)
+      const consoleMethod = level === 'ERROR' ? 'error' : level === 'WARN' ? 'warn' : 'log'
+      const prefix = `[${level}]`
+      console[consoleMethod](prefix, message, context)
+    }
+
+    // Buffer errors for potential backend reporting
+    if (level === 'ERROR') {
+      this.errorBuffer.push(entry)
+      if (this.errorBuffer.length > this.MAX_BUFFER_SIZE) {
+        this.errorBuffer.shift()
+      }
+
+      // In production, send critical errors to backend
+      if (!this.isDevelopment) {
+        this.reportError(entry).catch(err => {
+          console.error('Failed to report error to backend:', err)
+        })
+      }
+    }
+
+    // Log to browser console in production (for debugging)
+    if (!this.isDevelopment && level === 'ERROR') {
+      console.error(`[${level}] ${message}`, context)
     }
   }
 
   /**
-   * Info logs (general information)
+   * Report error to backend logging service
    */
-  info(message: string, context?: LogContext): void {
-    this.log('info', message, context)
+  private async reportError(entry: LogEntry) {
+    try {
+      // Only report in production, and throttle to avoid spam
+      if (this.isDevelopment) return
+
+      // Use fetch directly to avoid circular dependencies
+      const response = await fetch('/api/log-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry),
+      })
+
+      if (!response.ok) {
+        console.warn('Failed to report error to backend:', response.status)
+      }
+    } catch (error) {
+      // Silently fail - don't break the app if logging fails
+      console.warn('Error reporting failed:', error)
+    }
   }
 
   /**
-   * Warning logs (potential issues)
+   * Debug-level logging (only in development)
    */
-  warn(message: string, context?: LogContext, error?: Error): void {
-    this.log('warn', message, context, error)
+  debug(message: string, context: LogContext = {}) {
+    if (this.isDevelopment) {
+      this.log('DEBUG', message, context)
+    }
   }
 
   /**
-   * Error logs (actual errors)
+   * Info-level logging
    */
-  error(message: string, context?: LogContext, error?: Error): void {
-    this.log('error', message, context, error)
+  info(message: string, context: LogContext = {}) {
+    this.log('INFO', message, context)
   }
 
   /**
-   * Performance monitoring
+   * Warning-level logging
    */
-  performance(action: string, duration: number, context?: LogContext): void {
-    const level = duration > 1000 ? 'warn' : 'info'
-    this.log(level, `Performance: ${action} took ${duration}ms`, context, undefined, duration)
+  warn(message: string, context: LogContext = {}) {
+    this.log('WARN', message, context)
   }
 
   /**
-   * Get recent logs (for debugging)
+   * Error-level logging with full context
    */
-  getRecentLogs(count: number = 50): LogEntry[] {
-    return this.logBuffer.slice(-count)
+  error(message: string, error: Error | unknown, context: LogContext = {}) {
+    const errorContext: LogContext = {
+      ...context,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined,
+      errorName: error instanceof Error ? error.name : typeof error,
+    }
+
+    // Add error details if it's a structured error
+    if (error && typeof error === 'object') {
+      const err = error as any
+      if (err.status) errorContext.status = err.status
+      if (err.statusCode) errorContext.statusCode = err.statusCode
+      if (err.code) errorContext.code = err.code
+      if (err.context) errorContext.errorContext = err.context
+    }
+
+    this.log('ERROR', message, errorContext)
   }
 
   /**
-   * Clear log buffer
+   * Log API call with timing
    */
-  clearLogs(): void {
-    this.logBuffer = []
+  async logApiCall<T>(
+    functionName: string,
+    apiCall: () => Promise<T>,
+    context: LogContext = {}
+  ): Promise<T> {
+    const startTime = performance.now()
+    this.info(`API call started: ${functionName}`, { ...context, functionName })
+
+    try {
+      const result = await apiCall()
+      const duration = performance.now() - startTime
+      this.info(`API call succeeded: ${functionName}`, {
+        ...context,
+        functionName,
+        duration: `${duration.toFixed(2)}ms`,
+      })
+      return result
+    } catch (error) {
+      const duration = performance.now() - startTime
+      this.error(`API call failed: ${functionName}`, error, {
+        ...context,
+        functionName,
+        duration: `${duration.toFixed(2)}ms`,
+      })
+      throw error
+    }
+  }
+
+  /**
+   * Get recent errors for debugging
+   */
+  getRecentErrors(): LogEntry[] {
+    return [...this.errorBuffer]
+  }
+
+  /**
+   * Clear error buffer
+   */
+  clearErrorBuffer() {
+    this.errorBuffer = []
   }
 }
 
 // Export singleton instance
 export const logger = new Logger()
 
-// Export convenience functions
-export const logDebug = (message: string, context?: LogContext) => logger.debug(message, context)
-export const logInfo = (message: string, context?: LogContext) => logger.info(message, context)
-export const logWarn = (message: string, context?: LogContext, error?: Error) =>
-  logger.warn(message, context, error)
-export const logError = (message: string, context?: LogContext, error?: Error) =>
-  logger.error(message, context, error)
-export const logPerformance = (action: string, duration: number, context?: LogContext) =>
-  logger.performance(action, duration, context)
-
+// Export types for use in other files
+export type { LogLevel, LogContext, LogEntry }

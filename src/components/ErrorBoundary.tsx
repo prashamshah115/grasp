@@ -4,10 +4,10 @@
  * Following React Router v7 errorElement pattern
  */
 
-import { useRouteError, isRouteErrorResponse, Link } from 'react-router-dom'
+import { useRouteError, isRouteErrorResponse } from 'react-router-dom'
 import { AlertCircle, Home, RefreshCw } from 'lucide-react'
 import { Button } from './ui/button'
-import { isNovaloError, formatError } from '@/lib/errors'
+import { isNovaloError } from '@/lib/errors'
 
 export default function ErrorBoundary() {
   const error = useRouteError()

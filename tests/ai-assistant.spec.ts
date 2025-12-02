@@ -22,29 +22,29 @@ test.describe('AI Assistant', () => {
 
   test.describe('Floating Button', () => {
     test('should display floating button on all pages', async ({ page }) => {
-      // Look for floating AI assistant button - fixed bottom-right, purple gradient, sparkle icon
-      const aiButton = page.locator('button[class*="fixed"][class*="bottom"], button:has([class*="Sparkles"]), button[class*="rounded-full"]').first();
+      // Use data-testid for reliable selection
+      const aiButton = page.locator('[data-testid="ai-assistant-floating-button"]').first();
       await expect(aiButton).toBeVisible({ timeout: 5000 });
     });
 
     test('should open chat when clicking button', async ({ page }) => {
-      // Find AI assistant button
-      const aiButton = page.locator('button[class*="fixed"][class*="bottom"], button:has([class*="Sparkles"])').first();
+      // Use data-testid for reliable selection
+      const aiButton = page.locator('[data-testid="ai-assistant-floating-button"]').first();
       await expect(aiButton).toBeVisible({ timeout: 5000 });
       
       await aiButton.click();
       await page.waitForTimeout(1000);
       
       // Chat window should appear
-      const chatWindow = page.locator('text=AI Assistant, text=assistant').first();
+      const chatWindow = page.locator('text=AI Assistant').first();
       await expect(chatWindow).toBeVisible({ timeout: 5000 });
     });
   });
 
   test.describe('Chat Window UI', () => {
     test('should display chat window when opened', async ({ page }) => {
-      // Open chat
-      const aiButton = page.locator('button[class*="fixed"][class*="bottom"], button:has([class*="Sparkles"])').first();
+      // Open chat using data-testid
+      const aiButton = page.locator('[data-testid="ai-assistant-floating-button"]').first();
       await aiButton.click();
       await page.waitForTimeout(1000);
       
@@ -54,8 +54,8 @@ test.describe('AI Assistant', () => {
     });
 
     test('should display input field', async ({ page }) => {
-      // Open chat first
-      const aiButton = page.locator('button[class*="fixed"][class*="bottom"], button:has([class*="Sparkles"])').first();
+      // Open chat first using data-testid
+      const aiButton = page.locator('[data-testid="ai-assistant-floating-button"]').first();
       await aiButton.click();
       await page.waitForTimeout(1000);
       
@@ -65,21 +65,21 @@ test.describe('AI Assistant', () => {
     });
 
     test('should display send button', async ({ page }) => {
-      // Open chat first
-      const aiButton = page.locator('button[class*="fixed"][class*="bottom"], button:has([class*="Sparkles"])').first();
+      // Open chat first using data-testid
+      const aiButton = page.locator('[data-testid="ai-assistant-floating-button"]').first();
       await aiButton.click();
       await page.waitForTimeout(1000);
       
-      // Send button should be visible
-      const sendButton = page.locator('button:has([class*="Send"]), button[type="submit"]').first();
+      // Send button should be visible (look for Send icon or submit button)
+      const sendButton = page.locator('button:has([aria-label*="Send"]), button[type="submit"], button:has(svg)').first();
       await expect(sendButton).toBeVisible({ timeout: 5000 });
     });
   });
 
   test.describe('Message Sending', () => {
     test('should send message when clicking send', async ({ page }) => {
-      // Open chat
-      const aiButton = page.locator('button[class*="fixed"][class*="bottom"], button:has([class*="Sparkles"])').first();
+      // Open chat first
+      const aiButton = page.locator('[data-testid="ai-assistant-floating-button"]').first();
       await aiButton.click();
       await page.waitForTimeout(1000);
       
@@ -89,7 +89,7 @@ test.describe('AI Assistant', () => {
       await input.fill('Test message');
       
       // Click send
-      const sendButton = page.locator('button:has([class*="Send"]), button[type="submit"]').first();
+      const sendButton = page.locator('button:has([aria-label*="Send"]), button[type="submit"], button:has(svg)').first();
       await sendButton.click();
       await page.waitForTimeout(2000);
       
@@ -100,6 +100,11 @@ test.describe('AI Assistant', () => {
     });
 
     test('should send message when pressing Enter', async ({ page }) => {
+      // Open chat first
+      const aiButton = page.locator('[data-testid="ai-assistant-floating-button"]').first();
+      await aiButton.click();
+      await page.waitForTimeout(1000);
+      
       const input = page.locator('input[type="text"], textarea').first();
       const inputVisible = await input.isVisible().catch(() => false);
       

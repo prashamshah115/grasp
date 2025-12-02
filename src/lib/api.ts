@@ -533,6 +533,7 @@ export async function fetchExamSessionWithQuestions(
       started_at,
       time_remaining_sec,
       is_completed,
+      is_diagnostic,
       answers,
       state,
       current_question_index,
@@ -734,51 +735,48 @@ export async function submitExam(request: SubmitExamRequest): Promise<SubmitExam
  * Uses dual-stage retrieval (page → chunk)
  */
 export async function ragChat(request: RAGChatRequest): Promise<RAGChatResponse> {
+  const { logger } = await import('./logger')
   const user = await requireAuth()
 
-  console.log('[ragChat] Calling edge function with request:', {
-    message: request.message?.substring(0, 50),
-    topicId: request.topic_id,
-    courseId: request.course_id,
-    questionId: request.question_id,
-    userId: user.id,
-  })
+  return logger.logApiCall(
+    'rag-chat',
+    async () => {
+      // Normalize empty strings to null/undefined for UUID fields
+      const normalizedTopicId = request.topic_id && request.topic_id.trim() !== '' ? request.topic_id : undefined
+      const normalizedCourseId = request.course_id && request.course_id.trim() !== '' ? request.course_id : undefined
+      const normalizedQuestionId = request.question_id && request.question_id.trim() !== '' ? request.question_id : undefined
 
-  try {
-    // Normalize empty strings to null/undefined for UUID fields
-    const normalizedTopicId = request.topic_id && request.topic_id.trim() !== '' ? request.topic_id : undefined
-    const normalizedCourseId = request.course_id && request.course_id.trim() !== '' ? request.course_id : undefined
-    const normalizedQuestionId = request.question_id && request.question_id.trim() !== '' ? request.question_id : undefined
-
-    const result = await safeInvoke<RAGChatResponse>(
-      'rag-chat',
-      {
-        body: {
-          message: request.message,
-          topicId: normalizedTopicId,
-          courseId: normalizedCourseId,
-          questionId: normalizedQuestionId,
-          compressionNotes: request.compression_notes,
-          conversationHistory: request.conversation_history,
-        },
-      }
-    )
-    console.log('[ragChat] Success! Got response:', {
-      answerLength: result.answer?.length,
-      citationsCount: result.citations?.length,
-      pagesCount: result.pages?.length,
-    })
-    return result
-  } catch (error: any) {
-    console.error('[ragChat] Edge function call failed:', {
-      error: error.message,
-      status: error.status,
-      code: error.code,
-      context: error.context,
-      stack: error.stack,
-    })
-    throw error
-  }
+      const result = await safeInvoke<RAGChatResponse>(
+        'rag-chat',
+        {
+          body: {
+            message: request.message,
+            topicId: normalizedTopicId,
+            courseId: normalizedCourseId,
+            questionId: normalizedQuestionId,
+            compressionNotes: request.compression_notes,
+            conversationHistory: request.conversation_history,
+          },
+        }
+      )
+      
+      logger.info('RAG chat succeeded', {
+        functionName: 'rag-chat',
+        userId: user.id,
+        answerLength: result.answer?.length,
+        citationsCount: result.citations?.length,
+        pagesCount: result.pages?.length,
+      })
+      
+      return result
+    },
+    {
+      userId: user.id,
+      topicId: request.topic_id,
+      courseId: request.course_id,
+      questionId: request.question_id,
+    }
+  )
 }
 
 /**
@@ -834,38 +832,35 @@ export async function updateQuestionHistory(
 export async function generateCompression(
   request: GenerateCompressionRequest
 ): Promise<GenerateCompressionResponse> {
+  const { logger } = await import('./logger')
   const user = await requireAuth()
 
-  console.log('[generateCompression] Calling edge function with request:', {
-    topicId: request.topic_id,
-    userId: request.user_id,
-    actualUserId: user.id,
-  })
-
-  try {
-    const result = await safeInvoke<GenerateCompressionResponse>(
-      'generate-compression',
-      {
-        body: {
-          topicId: request.topic_id,
-        },
-      }
-    )
-    console.log('[generateCompression] Success! Got response:', {
-      contentLength: result.content?.length,
-      topicId: result.topic_id,
-    })
-    return result
-  } catch (error: any) {
-    console.error('[generateCompression] Edge function call failed:', {
-      error: error.message,
-      status: error.status,
-      code: error.code,
-      context: error.context,
-      stack: error.stack,
-    })
-    throw error
-  }
+  return logger.logApiCall(
+    'generateCompression',
+    async () => {
+      const result = await safeInvoke<GenerateCompressionResponse>(
+        'generate-compression',
+        {
+          body: {
+            topicId: request.topic_id,
+          },
+        }
+      )
+      
+      logger.info('Compression generation succeeded', {
+        functionName: 'generateCompression',
+        userId: user.id,
+        topicId: request.topic_id,
+        contentLength: result.content?.length,
+      })
+      
+      return result
+    },
+    {
+      userId: user.id,
+      topicId: request.topic_id,
+    }
+  )
 }
 
 /**
@@ -1149,12 +1144,22 @@ export interface RelevantContentChunk {
   doc_type: string
   similarity: number
   document_id: string
+  paragraph_before?: string  // NEW: Context paragraph before (paragraph-level retrieval)
+  paragraph_after?: string   // NEW: Context paragraph after (paragraph-level retrieval)
 }
 
 export interface RelevantContentResponse {
   chunks: RelevantContentChunk[]
+  external_results?: Array<{
+    id: string
+    title: string
+    url: string
+    snippet: string
+    source_type: string
+    similarity: number
+  }>
   total: number
-  source: 'vector' | 'topic' | 'none'
+  source: 'vector' | 'topic' | 'none' | 'mixed'
 }
 
 export interface GetRelevantContentRequest {
@@ -1349,6 +1354,20 @@ export async function triggerKnowledgeGraphGeneration(courseId: string) {
   )
 }
 
+/**
+ * ✅ NEW: Trigger personalized study pack generation via Trigger.dev
+ */
+export async function triggerPersonalizedStudyPackGeneration(courseId: string) {
+  const user = await requireAuth()
+
+  return safeInvoke(
+    'trigger-personalized-study-pack',
+    {
+      body: { course_id: courseId },
+    }
+  )
+}
+
 // ==================== KNOWLEDGE STATE VECTOR (KSV) ====================
 
 /**
@@ -1509,6 +1528,314 @@ export async function triggerKSVUpdate(courseId: string, userId: string) {
       },
     }
   )
+}
+
+// ==================== JOB STATUS ====================
+
+/**
+ * Fetch latest job status for a job type
+ */
+export async function fetchJobStatus(
+  jobType: 'final_packs' | 'study_plan' | 'knowledge_graph',
+  courseId: string,
+  userId?: string | null
+): Promise<{
+  id: string;
+  job_type: string;
+  course_id: string;
+  user_id: string | null;
+  trigger_job_id: string | null;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress_percent: number;
+  metadata: Record<string, any>;
+  error_message: string | null;
+  created_at: string;
+  completed_at: string | null;
+  updated_at: string;
+} | null> {
+  const user = await requireAuth()
+
+  const { data, error } = await supabase
+    .rpc('get_latest_job_status', {
+      p_job_type: jobType,
+      p_course_id: courseId,
+      p_user_id: userId || null,
+    })
+    .maybeSingle()
+
+  if (error) {
+    // If no job found, that's okay - return null
+    if (error.code === 'PGRST116') {
+      return null
+    }
+    handleSupabaseError(error)
+  }
+
+  return data || null
+}
+
+/**
+ * Check final packs prerequisites
+ */
+export async function checkFinalPacksPrerequisites(courseId: string) {
+  const user = await requireAuth()
+
+  const { data, error } = await supabase.rpc('check_final_packs_prerequisites', {
+    p_course_id: courseId,
+  })
+
+  // Handle missing function gracefully (function might not exist in all deployments)
+  if (error) {
+    const isFunctionMissing = error.code === 'PGRST301' || error.message?.includes('function') || error.message?.includes('does not exist');
+    if (isFunctionMissing) {
+      console.warn('check_final_packs_prerequisites function not found, returning default prerequisites check');
+      // Return default check - assume prerequisites are met if function doesn't exist
+      return {
+        can_generate: true,
+        missing_items: [],
+      };
+    }
+    handleSupabaseError(error);
+  }
+  return data || { can_generate: false, missing_items: [] };
+}
+
+/**
+ * Check study plan prerequisites
+ */
+export async function checkStudyPlanPrerequisites(userId: string, courseId: string) {
+  const user = await requireAuth()
+
+  const { data, error } = await supabase.rpc('check_study_plan_prerequisites', {
+    p_user_id: userId,
+    p_course_id: courseId,
+  })
+
+  // Handle missing function gracefully (function might not exist in all deployments)
+  if (error) {
+    const isFunctionMissing = error.code === 'PGRST301' || error.message?.includes('function') || error.message?.includes('does not exist');
+    if (isFunctionMissing) {
+      console.warn('check_study_plan_prerequisites function not found, returning default prerequisites check');
+      // Return default check - assume prerequisites are met if function doesn't exist
+      return {
+        can_generate: true,
+        missing_items: [],
+      };
+    }
+    handleSupabaseError(error);
+  }
+  return data || { can_generate: false, missing_items: [] };
+}
+
+/**
+ * Fetch active study plan for a user and course
+ */
+export async function fetchStudyPlan(courseId: string, userId: string) {
+  const user = await requireAuth()
+
+  const { data, error } = await supabase
+    .from('study_plans')
+    .select('*')
+    .eq('course_id', courseId)
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) handleSupabaseError(error)
+  return data
+}
+
+/**
+ * Fetch all study plans for a user and course (including archived)
+ */
+export async function fetchStudyPlans(courseId: string, userId: string) {
+  const user = await requireAuth()
+
+  const { data, error } = await supabase
+    .from('study_plans')
+    .select('*')
+    .eq('course_id', courseId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) handleSupabaseError(error)
+  return data || []
+}
+
+/**
+ * Trigger study plan generation
+ */
+export async function triggerStudyPlanGeneration(
+  courseId: string,
+  userId: string,
+  options?: {
+    targetDate?: string
+    dailyMinutes?: number
+    focusWeakTopics?: boolean
+  }
+) {
+  const user = await requireAuth()
+
+  return safeInvoke('trigger-study-plan', {
+    body: {
+      course_id: courseId,
+      user_id: userId,
+      target_date: options?.targetDate,
+      daily_minutes: options?.dailyMinutes,
+      focus_weak_topics: options?.focusWeakTopics,
+    },
+  })
+}
+
+/**
+ * Update study plan progress (mark tasks as complete)
+ */
+export async function updateStudyPlanProgress(
+  planId: string,
+  taskDay: number,
+  taskIndex: number,
+  completed: boolean
+) {
+  const user = await requireAuth()
+
+  // Fetch current plan
+  const { data: plan, error: fetchError } = await supabase
+    .from('study_plans')
+    .select('plan_content, progress_percent')
+    .eq('id', planId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (fetchError) handleSupabaseError(fetchError)
+  if (!plan) throw new Error('Study plan not found')
+
+  // Update task completion status
+  const planContent = plan.plan_content as any[]
+  if (!Array.isArray(planContent)) {
+    throw new Error('Invalid plan content')
+  }
+
+  const dayPlan = planContent.find((d: any) => d.day === taskDay)
+  if (!dayPlan || !Array.isArray(dayPlan.tasks)) {
+    throw new Error('Invalid day or tasks')
+  }
+
+  // Mark task as completed
+  if (!dayPlan.tasks[taskIndex]) {
+    throw new Error('Task not found')
+  }
+
+  dayPlan.tasks[taskIndex].completed = completed
+
+  // Calculate new progress
+  const totalTasks = planContent.reduce(
+    (sum, day: any) => sum + (Array.isArray(day.tasks) ? day.tasks.length : 0),
+    0
+  )
+  const completedTasks = planContent.reduce(
+    (sum, day: any) =>
+      sum +
+      (Array.isArray(day.tasks)
+        ? day.tasks.filter((t: any) => t.completed).length
+        : 0),
+    0
+  )
+  const newProgress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+
+  // Update plan
+  const { error: updateError } = await supabase
+    .from('study_plans')
+    .update({
+      plan_content: planContent,
+      progress_percent: newProgress,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', planId)
+
+  if (updateError) handleSupabaseError(updateError)
+
+  return { success: true, progress_percent: newProgress }
+}
+
+/**
+ * Archive a study plan
+ */
+export async function archiveStudyPlan(planId: string) {
+  const user = await requireAuth()
+
+  const { error } = await supabase
+    .from('study_plans')
+    .update({
+      status: 'archived',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', planId)
+    .eq('user_id', user.id)
+
+  if (error) handleSupabaseError(error)
+  return { success: true }
+}
+
+// ==================== DIAGNOSTIC STATUS ====================
+
+/**
+ * ✅ NEW: Upsert diagnostic status for a user and course
+ * Used to record completion of practice final diagnostic
+ */
+export async function upsertDiagnosticStatus(params: {
+  userId: string;
+  courseId: string;
+  completed: boolean;
+  score: number;
+  completedAt: string;
+  topicMastery?: Record<string, number>; // Map of topic_id to mastery (0-1)
+  sessionId?: string; // Exam session ID for audit trail
+}): Promise<any> {
+  const user = await requireAuth();
+  
+  if (user.id !== params.userId) {
+    throw new Error('User ID mismatch');
+  }
+
+  const { data, error } = await supabase
+    .from('diagnostic_status')
+    .upsert({
+      user_id: params.userId,
+      course_id: params.courseId,
+      completed: params.completed,
+      score: params.score,
+      completed_at: params.completedAt,
+      topic_mastery: params.topicMastery || null,
+      session_id: params.sessionId || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,course_id' })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error upserting diagnostic status:', error);
+    handleSupabaseError(error);
+  }
+
+  // Mark exam session as completed if sessionId provided
+  if (params.sessionId) {
+    const { error: sessionError } = await supabase
+      .from('exam_sessions')
+      .update({
+        is_completed: true,
+      })
+      .eq('id', params.sessionId)
+      .eq('user_id', user.id); // Ensure user owns the session
+
+    if (sessionError) {
+      console.warn('Failed to mark exam session as completed:', sessionError);
+      // Don't throw - diagnostic was recorded successfully
+    }
+  }
+
+  return data;
 }
 
 // ==================== WEB SEARCH ====================

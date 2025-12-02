@@ -86,6 +86,9 @@ export function ExamSimulation() {
   // Try to get session data from router state (if redirected from start exam)
   const sessionFromState = location.state?.sessionData as CreateExamSessionResponse | undefined
 
+  // Read diagnostic flag from route state (immediate)
+  const isDiagnosticFromState = location.state?.isDiagnostic === true
+
   // Fetch exam session with questions (fallback for page refresh)
   const {
     data: sessionData,
@@ -100,6 +103,9 @@ export function ExamSimulation() {
 
   // Use session from state if available, otherwise from query
   const session = sessionFromState || sessionData
+
+  // Determine if this is a diagnostic exam (from route state or database)
+  const isDiagnostic = isDiagnosticFromState || (sessionData as any)?.is_diagnostic === true
 
   // Fetch previously saved answers (for page refresh)
   const { data: savedAnswers } = useQuery({
@@ -209,8 +215,8 @@ export function ExamSimulation() {
   const saveAnswerMutation = useMutation({
     mutationFn: ({ questionId, answer, isFlagged }: { questionId: string; answer: string; isFlagged?: boolean }) =>
       submitExamAnswer(sessionId!, questionId, answer, isFlagged),
-    retry: 2,
-    retryDelay: 1000,
+    retry: 3, // Increased retries
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000), // Exponential backoff
     onSuccess: (data, variables) => {
       console.log('[ExamSimulation] Answer saved successfully:', variables.questionId)
       setSaveStatus({ questionId: variables.questionId, status: 'saved' })
@@ -335,9 +341,11 @@ export function ExamSimulation() {
   // ==================== HANDLERS ====================
 
   const handleSelectAnswer = (answerId: string) => {
-    if (!session) return
+    if (!session || !session.questions || !Array.isArray(session.questions)) return
 
     const currentQuestion = session.questions[currentQuestionIndex]
+    if (!currentQuestion || !currentQuestion.id) return
+    
     const newAnswers = { ...answers, [currentQuestion.id]: answerId }
     setAnswers(newAnswers)
 
@@ -367,9 +375,11 @@ export function ExamSimulation() {
   }, [failedSaves, answers, flagged, saveAnswerMutation])
 
   const handleToggleFlag = () => {
-    if (!session) return
+    if (!session || !session.questions || !Array.isArray(session.questions)) return
 
     const currentQuestion = session.questions[currentQuestionIndex]
+    if (!currentQuestion || !currentQuestion.id) return
+    
     const newFlagged = new Set(flagged)
     const isCurrentlyFlagged = newFlagged.has(currentQuestion.id)
 
@@ -476,31 +486,195 @@ export function ExamSimulation() {
   }
 
   const handleSubmitExam = async () => {
-    if (!session || isSubmitting) return
+    if (!session || isSubmitting) {
+      console.warn('[ExamSimulation] Cannot submit:', { 
+        hasSession: !!session, 
+        isSubmitting,
+        sessionId 
+      })
+      return
+    }
 
+    console.log('[ExamSimulation] Starting exam submission process...')
     setIsSubmitting(true)
 
     try {
-      // Write submit event
+      // Step 1: Save current answer immediately (no debounce)
+      const currentQuestion = session.questions[currentQuestionIndex]
+      if (currentQuestion && answers[currentQuestion.id]) {
+        const isFlagged = flagged.has(currentQuestion.id)
+        await new Promise<void>((resolve) => {
+          immediateSaveAnswer(currentQuestion.id, answers[currentQuestion.id], isFlagged)
+          // Wait a bit for the save to initiate
+          setTimeout(resolve, 500)
+        })
+      }
+
+      // Step 2: Save all other answers that haven't been saved yet
+      const savePromises: Promise<void>[] = []
+      for (const question of session.questions) {
+        if (answers[question.id] && question.id !== currentQuestion?.id) {
+          const isFlagged = flagged.has(question.id)
+          savePromises.push(
+            new Promise<void>((resolve, reject) => {
+              saveAnswerMutation.mutate(
+                { questionId: question.id, answer: answers[question.id], isFlagged },
+                {
+                  onSuccess: () => resolve(),
+                  onError: (error) => {
+                    console.error(`[ExamSimulation] Failed to save answer for question ${question.id}:`, error)
+                    // Don't reject - continue with submission even if some saves fail
+                    resolve()
+                  },
+                }
+              )
+            })
+          )
+        }
+      }
+
+      // Step 3: Retry failed saves
+      if (failedSaves.size > 0) {
+        console.log('[ExamSimulation] Retrying failed saves before submission:', Array.from(failedSaves))
+        for (const questionId of failedSaves) {
+          if (answers[questionId]) {
+            const question = session.questions.find((q) => q.id === questionId)
+            if (question) {
+              const isFlagged = flagged.has(questionId)
+              savePromises.push(
+                new Promise<void>((resolve) => {
+                  saveAnswerMutation.mutate(
+                    { questionId, answer: answers[questionId], isFlagged },
+                    {
+                      onSuccess: () => {
+                        setFailedSaves((prev) => {
+                          const next = new Set(prev)
+                          next.delete(questionId)
+                          return next
+                        })
+                        resolve()
+                      },
+                      onError: () => resolve(), // Continue even if retry fails
+                    }
+                  )
+                })
+              )
+            }
+          }
+        }
+      }
+
+      // Wait for all saves to complete (with timeout)
+      await Promise.allSettled(savePromises)
+
+      // Step 4: Write submit event
       await writeExamEvent(sessionId!, 'submit', {
         submittedAt: new Date().toISOString(),
-      }).catch((err: any) => console.error('[ExamSimulation] Failed to write submit event:', err))
+      }).catch((err: any) => {
+        console.error('[ExamSimulation] Failed to write submit event:', err)
+        // Non-blocking: continue with submission even if event write fails
+      })
       
-      // Submit exam via edge function (server-side scoring)
+      // Step 5: Submit exam via edge function (server-side scoring)
+      // Use sessionId from URL params (more reliable than session.session_id)
+      const sessionIdToSubmit = sessionId || session?.session_id
+      if (!sessionIdToSubmit) {
+        throw new Error('Cannot submit: Session ID is missing')
+      }
+      
+      console.log('[ExamSimulation] Submitting exam session:', sessionIdToSubmit)
+      console.log('[ExamSimulation] Session object:', { 
+        session_id: session?.session_id, 
+        sessionId: sessionId,
+        exam_id: session?.exam?.id 
+      })
+      
+      console.log('[ExamSimulation] Calling submitExamMutation with:', {
+        session_id: sessionIdToSubmit
+      })
+      
       const result = await submitExamMutation.mutateAsync({
-        session_id: session.session_id,
+        session_id: sessionIdToSubmit,
       })
 
-      // Navigate to results page with data
+      console.log('[ExamSimulation] Submission response received:', {
+        hasResult: !!result,
+        success: result?.success,
+        session_id: result?.session_id,
+        exam_name: result?.exam_name,
+        score: result?.score,
+        total_questions: result?.total_questions,
+        fullResult: result
+      })
+
+      // Validate submission response before navigating
+      if (!result) {
+        console.error('[ExamSimulation] No result returned from mutation')
+        throw new Error('Exam submission failed: No response from server')
+      }
+
+      // Note: result.success is always true in SubmitExamResponse type, but check anyway
+      if (result.success === false) {
+        console.error('[ExamSimulation] Submission returned success: false', result)
+        throw new Error(result?.error || 'Exam submission failed: Server returned error')
+      }
+
+      if (!result.session_id || !result.exam_name) {
+        console.error('[ExamSimulation] Invalid submission response - missing required fields:', {
+          hasSessionId: !!result.session_id,
+          hasExamName: !!result.exam_name,
+          result
+        })
+        throw new Error('Exam submission failed: Missing required data in response')
+      }
+
+      console.log('[ExamSimulation] Exam submitted successfully:', {
+        session_id: result.session_id,
+        score: result.score,
+        total_questions: result.total_questions,
+      })
+
+      // Navigate to results page with data (only if submission succeeded)
+      console.log('[ExamSimulation] Navigating to results page...')
       navigate(`/exam/${session.exam.id}/results`, {
         state: {
           examResults: result,
+          isDiagnostic: isDiagnostic, // Pass diagnostic flag to results
+          courseId: session.exam.course_id, // Pass courseId for ExamResults
         },
       })
-    } catch (error) {
-      console.error('Failed to submit exam:', error)
-      alert('Failed to submit exam. Please try again.')
+    } catch (error: any) {
+      // Comprehensive error logging
+      console.error('[ExamSimulation] Failed to submit exam - Full error details:', {
+        error,
+        errorType: error?.constructor?.name,
+        message: error?.message,
+        stack: error?.stack,
+        status: error?.status,
+        statusCode: error?.statusCode,
+        code: error?.code,
+        context: error?.context,
+        originalError: error?.originalError,
+        sessionId: sessionId,
+        session: session?.session_id,
+        examId: session?.exam?.id,
+        sessionObject: session,
+      })
+      
+      // Always reset submitting state on error
       setIsSubmitting(false)
+      
+      // Extract error message from various possible locations
+      const errorMessage = 
+        error?.message || 
+        error?.error?.message || 
+        error?.originalError?.message ||
+        error?.context?.message ||
+        error?.error ||
+        'Failed to submit exam. Please check your connection and try again.'
+      
+      console.error('[ExamSimulation] Showing error alert to user:', errorMessage)
+      alert(`Failed to submit exam: ${errorMessage}\n\nIf this problem persists, please contact support.`)
     }
   }
 
@@ -573,19 +747,37 @@ export function ExamSimulation() {
   }, [session, isSubmitting, updateTimeMutation]) // Remove timeRemainingSec from deps
 
   const handleOpenPdf = (documentId: string, title: string, page?: number) => {
-    const doc = sourceDocuments?.find(d => d.id === documentId)
-    if (!doc) return
+    try {
+      const doc = sourceDocuments?.find(d => d && d.id === documentId)
+      if (!doc) {
+        console.error('[ExamSimulation] Document not found:', documentId)
+        return
+      }
 
-    const { data } = supabase.storage
-      .from('course-materials')
-      .getPublicUrl(doc.storage_path)
+      const storagePath = doc.storage_path || doc.file_path || ''
+      if (!storagePath) {
+        console.error('[ExamSimulation] No storage path for document:', documentId)
+        return
+      }
 
-    setSelectedPdf({
-      url: data.publicUrl,
-      title,
-      page,
-    })
-    setShowSourceMaterials(false)
+      const { data } = supabase.storage
+        .from('course-materials')
+        .getPublicUrl(storagePath)
+
+      if (!data?.publicUrl) {
+        console.error('[ExamSimulation] Failed to get public URL for document:', documentId)
+        return
+      }
+
+      setSelectedPdf({
+        url: data.publicUrl,
+        title: title || doc.title || 'Document',
+        page,
+      })
+      setShowSourceMaterials(false)
+    } catch (error) {
+      console.error('[ExamSimulation] Failed to open PDF:', error)
+    }
   }
 
   // ==================== LOADING & ERROR STATES ====================
@@ -629,22 +821,39 @@ export function ExamSimulation() {
 
   // ==================== RENDER ====================
 
-  const answeredCount = Object.keys(answers).length
+  // Count only valid, non-empty answers for questions that exist in the session
+  const answeredCount = session.questions.filter(q => 
+    q?.id && answers[q.id] && answers[q.id].trim() !== ''
+  ).length
 
-  const questionsWithStatus = session.questions.map((q, index) => ({
-    id: q.id,
+  // Guard: if no current question, show loading or error
+  if (!currentQuestion) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-[#4F46E5]" />
+          <p className="text-[#6B7280]">Loading question...</p>
+        </div>
+      </div>
+    )
+  }
+
+  const questionsWithStatus = (session?.questions && Array.isArray(session.questions) ? session.questions : []).map((q, index) => ({
+    id: q?.id || String(index),
     number: index + 1,
-    isAnswered: !!answers[q.id],
-    isFlagged: flagged.has(q.id),
+    isAnswered: !!(q?.id && answers[q.id]),
+    isFlagged: !!(q?.id && flagged.has(q.id)),
   }))
 
   // Format options for QuestionCard component
   const formattedOptions =
-    currentQuestion.q_type === 'mcq' && currentQuestion.options
-      ? Object.entries(currentQuestion.options as Record<string, any>).map(([id, value]) => ({
-          id,
-          text: typeof value === 'string' ? value : value.text || value,
-        }))
+    currentQuestion?.q_type === 'mcq' && currentQuestion?.options
+      ? Object.entries(currentQuestion.options as Record<string, any>)
+          .filter(([id, value]) => id && value)
+          .map(([id, value]) => ({
+            id,
+            text: typeof value === 'string' ? value : (value?.text || value || ''),
+          }))
       : []
 
   return (
@@ -677,6 +886,59 @@ export function ExamSimulation() {
           </div>
         </div>
       </div>
+
+      {/* Failed Saves Warning */}
+      {failedSaves.size > 0 && (
+        <div className="bg-yellow-50 border-b border-yellow-200 px-8 py-3">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+              <p className="text-yellow-800 text-sm">
+                Some answers failed to save. Failed questions: {Array.from(failedSaves).map((qId) => {
+                  const question = session.questions.find((q) => q.id === qId)
+                  return question ? session.questions.indexOf(question) + 1 : qId
+                }).join(', ')}. These will be retried on submission.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                // Retry all failed saves
+                const retryPromises: Promise<void>[] = []
+                for (const questionId of failedSaves) {
+                  if (answers[questionId]) {
+                    const question = session.questions.find((q) => q.id === questionId)
+                    if (question) {
+                      const isFlagged = flagged.has(questionId)
+                      retryPromises.push(
+                        new Promise<void>((resolve) => {
+                          saveAnswerMutation.mutate(
+                            { questionId, answer: answers[questionId], isFlagged },
+                            {
+                              onSuccess: () => {
+                                setFailedSaves((prev) => {
+                                  const next = new Set(prev)
+                                  next.delete(questionId)
+                                  return next
+                                })
+                                resolve()
+                              },
+                              onError: () => resolve(), // Continue even if retry fails
+                            }
+                          )
+                        })
+                      )
+                    }
+                  }
+                }
+                Promise.allSettled(retryPromises)
+              }}
+              className="px-4 py-2 text-sm font-medium bg-yellow-600 text-white rounded-[8px] hover:bg-yellow-700 transition-colors"
+            >
+              Retry Failed Saves
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex flex-1">
@@ -830,25 +1092,32 @@ export function ExamSimulation() {
           <div className="relative bg-white rounded-[16px] p-8 max-w-2xl w-full mx-4 shadow-2xl">
             <h3 className="text-xl font-semibold mb-6">Source Materials</h3>
             <div className="space-y-3 max-h-96 overflow-y-auto">
-              {sourceDocuments.map((doc) => (
-                <button
-                  key={doc.id}
-                  onClick={() => handleOpenPdf(doc.id, doc.title)}
-                  className="w-full flex items-center gap-4 p-4 border border-[#E5E7EB] rounded-[12px] hover:border-[#4F46E5] hover:bg-[#F9FAFB] transition-all text-left"
-                >
-                  <div className="flex-shrink-0 w-12 h-12 rounded-[10px] bg-[#FEE2E2] flex items-center justify-center">
-                    <BookOpen className="w-6 h-6 text-[#EF4444]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-[#111827] truncate mb-1">
-                      {doc.title}
+              {sourceDocuments && Array.isArray(sourceDocuments) && sourceDocuments.length > 0 ? (
+                sourceDocuments.map((doc) => (
+                  <button
+                    key={doc.id}
+                    onClick={() => handleOpenPdf(doc.id, doc.title || 'Document')}
+                    className="w-full flex items-center gap-4 p-4 border border-[#E5E7EB] rounded-[12px] hover:border-[#4F46E5] hover:bg-[#F9FAFB] transition-all text-left"
+                  >
+                    <div className="flex-shrink-0 w-12 h-12 rounded-[10px] bg-[#FEE2E2] flex items-center justify-center">
+                      <BookOpen className="w-6 h-6 text-[#EF4444]" />
                     </div>
-                    <div className="text-sm text-[#6B7280]">
-                      {doc.doc_type} • {doc.total_pages || '?'} pages
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[#111827] truncate mb-1">
+                        {doc.title || 'Untitled Document'}
+                      </div>
+                      <div className="text-sm text-[#6B7280]">
+                        {doc.doc_type || 'Document'} • {doc.total_pages || '?'} pages
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                ))
+              ) : (
+                <div className="text-center py-8 text-[#6B7280]">
+                  <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>No source materials available for this question.</p>
+                </div>
+              )}
             </div>
             <button
               onClick={() => setShowSourceMaterials(false)}

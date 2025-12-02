@@ -59,6 +59,7 @@ FUNCTIONS=(
     "generate-compression"
     "trigger-knowledge-graph"
     "trigger-final-packs"
+    "compute-ksv"
     
     # Exam functionality
     "start-exam-session"

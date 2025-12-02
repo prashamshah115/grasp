@@ -28,6 +28,8 @@ interface ContentChunk {
   document_id: string
   source_type?: 'course' | 'web'  // NEW: Distinguish course vs web content
   url?: string                     // NEW: For web sources
+  paragraph_before?: string        // NEW: Context paragraph before
+  paragraph_after?: string         // NEW: Context paragraph after
 }
 
 interface ExternalResult {
@@ -169,34 +171,70 @@ serve(async (req) => {
         console.log(`[${FUNCTION_NAME}] Generating embedding for:`, searchText.substring(0, 100))
         const queryEmbedding = await generateBGEEmbedding(searchText)
 
-        // Search course documents
-        const { data: pages, error: searchError } = await supabase.rpc(
-          'search_document_pages',
+        // Try paragraph-level search first (more precise)
+        let paragraphs: any[] = []
+        const { data: paragraphResults, error: paragraphError } = await supabase.rpc(
+          'search_document_paragraphs',
           {
             query_embedding: queryEmbedding,
             filter_course_id: normalizedCourseId,
-            filter_topic_id: null, // Don't filter by topic - documents aren't linked to topics
-            filter_user_id: user.id,
-            match_threshold: 0.5, // Slightly lower threshold for better recall
+            match_threshold: 0.6,
             match_count: 5
           }
         )
 
-        if (searchError) {
-          console.error(`[${FUNCTION_NAME}] Vector search error:`, searchError)
-        } else if (pages && pages.length > 0) {
-          console.log(`[${FUNCTION_NAME}] Vector search found ${pages.length} course results`)
-          chunks = pages.map((p: any) => ({
+        if (paragraphError) {
+          console.warn(`[${FUNCTION_NAME}] Paragraph search error (falling back to pages):`, paragraphError)
+        } else if (paragraphResults && paragraphResults.length > 0) {
+          console.log(`[${FUNCTION_NAME}] Paragraph search found ${paragraphResults.length} results`)
+          paragraphs = paragraphResults
+        }
+
+        // If paragraph search succeeded, use it; otherwise fall back to page search
+        if (paragraphs.length > 0) {
+          chunks = paragraphs.map((p: any) => ({
             id: p.id,
             content: p.content,
             doc_title: p.doc_title,
             page_number: p.page_number,
-            doc_type: p.doc_type,
+            doc_type: 'notes', // Paragraphs don't have doc_type, default to notes
             similarity: p.similarity,
             document_id: p.document_id,
-            source_type: 'course' as const
+            source_type: 'course' as const,
+            paragraph_before: p.paragraph_before || undefined,
+            paragraph_after: p.paragraph_after || undefined
           }))
           source = 'vector'
+        } else {
+          // Fallback to page-level search if paragraphs not available
+          const { data: pages, error: searchError } = await supabase.rpc(
+            'search_document_pages',
+            {
+              query_embedding: queryEmbedding,
+              filter_course_id: normalizedCourseId,
+              filter_topic_id: null,
+              filter_user_id: user.id,
+              match_threshold: 0.5,
+              match_count: 5
+            }
+          )
+
+          if (searchError) {
+            console.error(`[${FUNCTION_NAME}] Vector search error:`, searchError)
+          } else if (pages && pages.length > 0) {
+            console.log(`[${FUNCTION_NAME}] Vector search found ${pages.length} course results (page-level)`)
+            chunks = pages.map((p: any) => ({
+              id: p.id,
+              content: p.content,
+              doc_title: p.doc_title,
+              page_number: p.page_number,
+              doc_type: p.doc_type,
+              similarity: p.similarity,
+              document_id: p.document_id,
+              source_type: 'course' as const
+            }))
+            source = 'vector'
+          }
         }
 
         // NEW: Also search external_search_results if courseId provided

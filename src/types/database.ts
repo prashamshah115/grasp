@@ -362,7 +362,7 @@ export interface Database {
           id: string
           course_id: string
           name: string
-          exam_type: 'midterm' | 'final' | 'practice'
+          exam_type: 'midterm' | 'final' | 'practice' | 'quiz'
           duration_min: number
           description: string | null
           created_at: string
@@ -371,7 +371,7 @@ export interface Database {
           id?: string
           course_id: string
           name: string
-          exam_type: 'midterm' | 'final' | 'practice'
+          exam_type: 'midterm' | 'final' | 'practice' | 'quiz'
           duration_min: number
           description?: string | null
           created_at?: string
@@ -380,7 +380,7 @@ export interface Database {
           id?: string
           course_id?: string
           name?: string
-          exam_type?: 'midterm' | 'final' | 'practice'
+          exam_type?: 'midterm' | 'final' | 'practice' | 'quiz'
           duration_min?: number
           description?: string | null
           created_at?: string

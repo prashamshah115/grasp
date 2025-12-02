@@ -25,8 +25,10 @@ import { FinalPackView } from './FinalPackView';
 import { 
   useUserFinalPreferences, 
   useUpdateFinalPreferences,
-  useFinalsDashboard
+  useFinalsDashboard,
+  useStudyPlan
 } from '@/hooks/useFinals';
+import { Calendar as CalendarIcon, Sparkles } from 'lucide-react';
 
 interface FinalsSectionProps {
   courseId: string;
@@ -88,6 +90,9 @@ export function FinalsSection({
   const { data: dashboardData } = useFinalsDashboard();
   const courseStats = dashboardData?.find(d => d.course_id === courseId);
   
+  // Fetch study plan for quick access
+  const { data: studyPlan } = useStudyPlan(courseId);
+  
   // Local date state synced with preferences
   const localDate = preferences?.final_exam_date 
     ? preferences.final_exam_date.split('T')[0] 
@@ -114,10 +119,19 @@ export function FinalsSection({
     const newDate = e.target.value;
     
     if (newDate) {
-      updatePreferences.mutate({
-        courseId,
-        finalExamDate: newDate,
-      });
+      updatePreferences.mutate(
+        {
+          courseId,
+          finalExamDate: newDate,
+        },
+        {
+          onError: (error: any) => {
+            console.error('Failed to update final exam date:', error);
+            // Don't crash the UI - just log the error
+            // The date will remain in local state even if save fails
+          },
+        }
+      );
     }
   };
 
@@ -142,18 +156,29 @@ export function FinalsSection({
       >
         {/* Gradient Background */}
         <div
-          className={`bg-gradient-to-br ${
-            isUrgent
-              ? 'from-[#EF4444] to-[#DC2626]'
+          className={`transition-all duration-300 flex-1 flex flex-col ${
+            // When collapsed, always show the canonical purple gradient
+            !isExpanded
+              ? 'bg-gradient-to-br from-[#4F46E5] to-[#6366F1]'
+              : isUrgent
+              ? 'bg-gradient-to-br from-[#EF4444] to-[#DC2626]'
               : isComingSoon
-              ? 'from-[#F59E0B] to-[#D97706]'
-              : 'from-[#4F46E5] to-[#6366F1]'
-          } transition-all duration-300 flex-1 flex flex-col`}
+              ? 'bg-gradient-to-br from-[#F59E0B] to-[#D97706]'
+              : 'bg-gradient-to-br from-[#4F46E5] to-[#6366F1]'
+          }`}
         >
           {/* Header Section - Always Visible */}
-          <button
+          <div
             onClick={handleToggleExpand}
-            className="w-full px-8 py-6 text-left group flex-shrink-0"
+            className="w-full px-8 py-6 text-left group flex-shrink-0 cursor-pointer"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleToggleExpand();
+              }
+            }}
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">
@@ -182,6 +207,7 @@ export function FinalsSection({
                     onChange={handleDateChange}
                     onClick={(e) => e.stopPropagation()}
                     className="px-3 py-1.5 rounded-[8px] bg-white/20 backdrop-blur-sm text-white placeholder-white/60 border border-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 transition-all cursor-pointer text-sm"
+                    data-finals-date-picker="true"
                     style={{ colorScheme: 'dark' }}
                   />
                   {daysUntil !== null && (
@@ -199,8 +225,21 @@ export function FinalsSection({
                 </div>
               </div>
 
-              {/* Expand/Collapse Button */}
+              {/* Action Buttons */}
               <div className="flex items-center gap-3">
+                {/* Study Plan Button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/course/${courseId}/finals/plan`);
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-[8px] transition-all text-white text-sm font-medium"
+                >
+                  <CalendarIcon className="w-4 h-4" />
+                  <span className="hidden sm:inline">
+                    {studyPlan ? 'View Plan' : 'Study Plan'}
+                  </span>
+                </button>
                 <span className="text-white/70 text-sm hidden lg:inline">
                   {isExpanded ? 'Collapse' : 'Study Materials'}
                 </span>
@@ -213,7 +252,7 @@ export function FinalsSection({
                 </div>
               </div>
             </div>
-          </button>
+          </div>
 
           {/* Stats Row - Visible when collapsed */}
           {!isExpanded && (
@@ -258,3 +297,26 @@ export function FinalsSection({
 }
 
 export default FinalsSection;
+
+// Helper to scroll to the finals date picker from other components
+export function scrollToFinalsPackDatePicker() {
+  if (typeof document === 'undefined') return;
+
+  const el = document.querySelector<HTMLElement>('[data-finals-date-picker="true"]');
+  if (!el) return;
+
+  try {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Focus after a short delay so we don't override scroll behavior
+    window.setTimeout(() => {
+      try {
+        el.focus();
+      } catch {
+        // ignore focus errors
+      }
+    }, 300);
+  } catch {
+    // Fail silently if scrollIntoView is not available
+  }
+}
+

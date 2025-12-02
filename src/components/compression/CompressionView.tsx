@@ -17,6 +17,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useCourse, useTopics, useCompressionNotes, useGenerateCompression } from '@/hooks'
 import { useTriggerKSVUpdate } from '@/hooks/useKnowledgeState'
+import { logger } from '@/lib/logger'
+import { ErrorDisplay } from '@/components/errors/ErrorDisplay'
 import { useAuth } from '@/components/auth/AuthProvider'
 import LoadingScreen from '../LoadingScreen'
 import { AIAssistant } from '../shared/AIAssistant'
@@ -89,16 +91,28 @@ export function CompressionView() {
   const { data: allNotes } = useQuery({
     queryKey: ['allCompressionNotes', courseId, user?.id],
     queryFn: async () => {
+      if (!user?.id || !topics || !Array.isArray(topics) || topics.length === 0) {
+        return []
+      }
+
+      const topicIds = topics
+        .filter(t => t && t.id)
+        .map(t => t.id)
+      
+      if (topicIds.length === 0) {
+        return []
+      }
+
       const { data, error } = await supabase
         .from('compression_notes')
         .select('topic_id, content_md')
-        .eq('user_id', user!.id)
-        .in('topic_id', topics?.map(t => t.id) || [])
+        .eq('user_id', user.id)
+        .in('topic_id', topicIds)
 
       if (error && error.code !== 'PGRST116') throw error
       return data || []
     },
-    enabled: !!user?.id && !!topics && topics.length > 0,
+    enabled: !!user?.id && !!topics && Array.isArray(topics) && topics.length > 0,
   })
 
   // Aggregate all compression notes for Finals Cheatsheet
@@ -134,12 +148,17 @@ export function CompressionView() {
     )
   }
 
-  const selectedTopic = topics?.find((t) => t.id === selectedTopicId)
-  const topicsWithNotes = allNotes?.filter(n => n.topic_id).length || 0
+  const selectedTopic = topics?.find((t) => t && t.id === selectedTopicId)
+  const topicsWithNotes = (allNotes && Array.isArray(allNotes) ? allNotes.filter(n => n && n.topic_id) : []).length || 0
 
   const handleGenerate = async () => {
-    if (!selectedTopicId || !user?.id) {
-      console.error('Cannot generate compression: missing topicId or userId')
+    if (!selectedTopicId) {
+      alert('Please select a topic first')
+      return
+    }
+    
+    if (!user?.id) {
+      alert('Please sign in to generate study materials')
       return
     }
 
@@ -156,27 +175,21 @@ export function CompressionView() {
       
       if (result && result.content) {
         // Success - query will be invalidated automatically by the mutation
-        console.log('Compression generated successfully')
+        console.log('[CompressionView] Compression generated successfully')
       }
     } catch (error: any) {
-      console.error('Failed to generate compression:', error)
+      logger.error('Failed to generate compression', error, {
+        component: 'CompressionView',
+        userId: user?.id,
+        topicId: selectedTopicId,
+        courseId,
+      })
       
-      // Show user-friendly error message based on error type
-      let errorMsg = 'Failed to generate compression notes'
+      // Show user-friendly error message
+      const errorMessage = error?.message || error?.context?.message || 'Failed to generate study materials. Please try again.'
       
-      if (error?.message) {
-        if (error.message.includes('No documents found') || error.message.includes('404')) {
-          errorMsg = 'No course materials found for this topic. Compression uses existing documents in the database - please upload course materials first or check if documents exist for this course.'
-        } else if (error.message.includes('rate limit') || error.message.includes('429')) {
-          errorMsg = 'Rate limit exceeded. Please wait a moment and try again.'
-        } else if (error.message.includes('API') || error.message.includes('credits') || error.message.includes('quota')) {
-          errorMsg = 'AI service temporarily unavailable. This may be due to API credits. Please try again later or contact support.'
-        } else {
-          errorMsg = error.message
-        }
-      }
-      
-      alert(`Error: ${errorMsg}`)
+      // Error is also displayed via ErrorDisplay component, but show alert as backup
+      alert(`Failed to generate study materials: ${errorMessage}`)
     }
   }
 
@@ -199,14 +212,16 @@ export function CompressionView() {
   }
 
   const handleDownloadFinalsCheatsheet = () => {
-    if (!finalsCheatsheet) return
+    if (!finalsCheatsheet || !Array.isArray(finalsCheatsheet) || finalsCheatsheet.length === 0) return
 
     // Create markdown content with all topics
     const content = `# Finals Cheatsheet - ${course.name} (${course.code})\n\n` +
       `Generated: ${new Date().toLocaleDateString()}\n\n---\n\n` +
-      finalsCheatsheet.map(item => 
-        `## ${item.topic.name}\n\n${item.content}\n\n---\n`
-      ).join('\n')
+      finalsCheatsheet
+        .filter(item => item && item.topic && item.content)
+        .map(item => 
+          `## ${item.topic.name}\n\n${item.content}\n\n---\n`
+        ).join('\n')
 
     // Create blob and download
     const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
@@ -305,14 +320,19 @@ export function CompressionView() {
           ) : activeTab === 'topics' ? (
             // Topics List
             <div className="space-y-2">
-              {topics?.map((topic) => {
+              {(topics && Array.isArray(topics) ? topics : []).map((topic) => {
                 // Check if this topic has compression notes
                 const hasNotes = allNotes?.some(n => n.topic_id === topic.id) || false
 
                 return (
                   <button
                     key={topic.id}
-                    onClick={() => setSelectedTopicId(topic.id)}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setSelectedTopicId(topic.id)
+                    }}
                     className={`w-full text-left p-4 rounded-[12px] transition-all ${
                       selectedTopicId === topic.id
                         ? 'bg-white border border-[#10B981] shadow-sm'
@@ -360,33 +380,38 @@ export function CompressionView() {
               </div>
 
               {/* Topics with notes */}
-              {finalsCheatsheet && (
+              {finalsCheatsheet && Array.isArray(finalsCheatsheet) && finalsCheatsheet.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs text-[#9CA3AF] px-1">Included topics:</p>
-                  {finalsCheatsheet.map((item) => (
-                    <div
-                      key={item.topic.id}
-                      className="p-3 bg-white border border-transparent hover:border-[#E5E7EB] rounded-[10px] transition-all"
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-[#10B981]" />
-                        <span className="text-sm">{item.topic.name}</span>
+                  {finalsCheatsheet
+                    .filter(item => item && item.topic && item.topic.id)
+                    .map((item) => (
+                      <div
+                        key={item.topic.id}
+                        className="p-3 bg-white border border-transparent hover:border-[#E5E7EB] rounded-[10px] transition-all"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-[#10B981]" />
+                          <span className="text-sm">{item.topic.name}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               )}
 
               {/* Topics without notes */}
-              {topics && topics.length > topicsWithNotes && (
+              {topics && Array.isArray(topics) && topics.length > topicsWithNotes && (
                 <div className="space-y-2">
                   <p className="text-xs text-[#9CA3AF] px-1">Missing topics:</p>
                   {topics
-                    .filter(t => !allNotes?.some(n => n.topic_id === t.id))
+                    .filter(t => t && t.id && !(allNotes && Array.isArray(allNotes) && allNotes.some(n => n && n.topic_id === t.id)))
                     .map((topic) => (
                       <button
                         key={topic.id}
-                        onClick={() => {
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
                           setActiveTab('topics')
                           setSelectedTopicId(topic.id)
                         }}
@@ -428,9 +453,11 @@ export function CompressionView() {
               </button>
             </div>
 
-            {finalsCheatsheet && finalsCheatsheet.length > 0 ? (
+            {finalsCheatsheet && Array.isArray(finalsCheatsheet) && finalsCheatsheet.length > 0 ? (
               <div className="space-y-8">
-                {finalsCheatsheet.map((item, index) => (
+                  {finalsCheatsheet
+                    .filter(item => item && item.topic && item.topic.id && item.content)
+                    .map((item, index) => (
                   <div key={item.topic.id} className="pb-8 border-b border-[#E5E7EB] last:border-0">
                     <div className="flex items-center gap-3 mb-4">
                       <span className="flex items-center justify-center w-7 h-7 rounded-full bg-[#F5F3FF] text-sm text-[#4F46E5] font-medium">
@@ -478,37 +505,49 @@ export function CompressionView() {
                 </div>
                 <h1 className="text-4xl tracking-tight">{selectedTopic.name}</h1>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleGenerate}
-                  disabled={generateCompression.isPending}
-                  className="flex items-center gap-2 px-4 py-2 rounded-[10px] border border-[#E5E7EB] text-[#6B7280] hover:border-[#10B981] hover:text-[#10B981] transition-all disabled:opacity-50"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span className="text-sm">
-                    {generateCompression.isPending ? 'Generating...' : 'Regenerate'}
-                  </span>
-                </button>
-                <button
-                  onClick={handleDownload}
-                  disabled={!notes}
-                  className="flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#10B981] text-white hover:bg-[#059669] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Download className="w-4 h-4" />
-                  <span className="text-sm">Download</span>
-                </button>
+              <div className="flex flex-col gap-3">
+                {generateCompression.isError && (
+                  <ErrorDisplay
+                    error={generateCompression.error || new Error('Failed to generate compression')}
+                    onRetry={handleGenerate}
+                    onDismiss={() => generateCompression.reset()}
+                    title="Generation Failed"
+                  />
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleGenerate}
+                    disabled={generateCompression.isPending || !selectedTopicId || !user?.id}
+                    className="flex items-center gap-2 px-4 py-2 rounded-[10px] border border-[#E5E7EB] text-[#6B7280] hover:border-[#10B981] hover:text-[#10B981] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span className="text-sm">
+                      {generateCompression.isPending ? 'Generating...' : notes ? 'Regenerate' : 'Generate'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={handleDownload}
+                    disabled={!notes}
+                    className="flex items-center gap-2 px-4 py-2 rounded-[10px] bg-[#10B981] text-white hover:bg-[#059669] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span className="text-sm">Download</span>
+                  </button>
+                </div>
               </div>
             </div>
 
             {/* Source Materials */}
-            {topicDocuments && topicDocuments.length > 0 && (
+            {topicDocuments && Array.isArray(topicDocuments) && topicDocuments.length > 0 && (
               <div className="mb-8 p-6 bg-[#F9FAFB] rounded-[12px] border border-[#E5E7EB]">
                 <h3 className="text-sm font-medium text-[#6B7280] mb-4">Source Materials</h3>
                 <div className="space-y-2">
-                  {topicDocuments.map((doc) => (
+                  {topicDocuments
+                    .filter(doc => doc && doc.id)
+                    .map((doc) => (
                     <button
                       key={doc.id}
-                      onClick={() => handleOpenPdf(doc.id, doc.title)}
+                      onClick={() => handleOpenPdf(doc.id, doc.title || 'Document')}
                       className="w-full flex items-center gap-3 p-3 bg-white border border-[#E5E7EB] rounded-[10px] hover:border-[#4F46E5] hover:bg-[#F9FAFB] transition-all text-left"
                     >
                       <FileIcon className="w-5 h-5 text-[#EF4444] flex-shrink-0" />
@@ -550,6 +589,15 @@ export function CompressionView() {
                 <p className="text-[#6B7280] mb-6">
                   Generate AI-powered study notes for this topic
                 </p>
+                {generateCompression.isError && (
+                  <div className="mb-4">
+                    <ErrorDisplay
+                      error={generateCompression.error || new Error('Failed to generate compression')}
+                      onRetry={handleGenerate}
+                      title="Generation Failed"
+                    />
+                  </div>
+                )}
                 <button
                   onClick={handleGenerate}
                   disabled={generateCompression.isPending}

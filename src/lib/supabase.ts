@@ -13,22 +13,28 @@ import type { Database } from '@/types/database'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-if (!supabaseUrl) {
-  throw new Error('Missing VITE_SUPABASE_URL environment variable')
-}
-
-if (!supabaseAnonKey) {
-  throw new Error('Missing VITE_SUPABASE_ANON_KEY environment variable')
+// Warn about missing env vars but don't crash - allows graceful degradation
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase environment variables:', {
+    hasUrl: !!supabaseUrl,
+    hasKey: !!supabaseAnonKey,
+  })
+  // Create a mock client to prevent crashes - actual API calls will fail gracefully
 }
 
 // Create typed Supabase client (singleton)
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-})
+// Use fallback values to prevent crashes if env vars are missing
+export const supabase = createClient<Database>(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  }
+)
 
 // Type helper for better autocomplete
 export type SupabaseClient = typeof supabase

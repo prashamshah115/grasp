@@ -13,6 +13,14 @@ import {
   ForbiddenError,
   isValidUUID,
 } from '../_shared/errors.ts'
+import {
+  logFunctionStart,
+  logFunctionEnd,
+  logQuery,
+  logError,
+  logValidationError,
+  createTimer,
+} from '../_shared/logger.ts'
 
 interface ComputeKSVRequest {
   course_id: string
@@ -29,6 +37,7 @@ interface ComputeKSVResponse {
 
 serve(async (req) => {
   const FUNCTION_NAME = 'compute-ksv'
+  const timer = createTimer(FUNCTION_NAME)
 
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -36,9 +45,12 @@ serve(async (req) => {
   }
 
   try {
+    logFunctionStart(FUNCTION_NAME)
+    
     // Authenticate user
+    timer.checkpoint('auth_start')
     const { supabase, user } = await requireAuth(req)
-    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
+    timer.checkpoint('auth_complete', { userId: user.id })
 
     // Parse request
     let body: ComputeKSVRequest
@@ -75,15 +87,31 @@ serve(async (req) => {
     console.log(`[${FUNCTION_NAME}] Request:`, { userId: user_id, courseId: course_id })
 
     // Verify course exists
+    timer.checkpoint('verify_course_start')
     const { data: course, error: courseError } = await supabase
       .from('courses')
       .select('id, code, name')
       .eq('id', course_id)
       .single()
 
+    logQuery(FUNCTION_NAME, 'fetch_course', {
+      count: course ? 1 : 0,
+      error: courseError,
+    }, {
+      userId: user_id,
+      courseId: course_id,
+    })
+
     if (courseError || !course) {
+      logError(FUNCTION_NAME, courseError || new Error('Course not found'), {
+        step: 'verify_course',
+        userId: user_id,
+        courseId: course_id,
+      })
+      timer.end({ success: false, reason: 'course_not_found' })
       throw new NotFoundError('Course not found')
     }
+    timer.checkpoint('verify_course_complete', { courseCode: course.code })
 
     // Verify user is enrolled in the course
     const { data: enrollment, error: enrollError } = await supabase
@@ -98,22 +126,37 @@ serve(async (req) => {
     }
 
     // Call the compute_knowledge_state_vector RPC function
-    console.log(`[${FUNCTION_NAME}] Computing KSV for user ${user_id}, course ${course_id}`)
-
+    timer.checkpoint('compute_ksv_start')
     const { data: ksvRecords, error: computeError } = await supabase
       .rpc('compute_knowledge_state_vector', {
         p_user_id: user_id,
         p_course_id: course_id,
       })
 
+    logQuery(FUNCTION_NAME, 'compute_knowledge_state_vector', {
+      count: Array.isArray(ksvRecords) ? ksvRecords.length : 0,
+      error: computeError,
+    }, {
+      userId: user_id,
+      courseId: course_id,
+    })
+
     if (computeError) {
-      console.error(`[${FUNCTION_NAME}] RPC error:`, computeError)
+      logError(FUNCTION_NAME, computeError, {
+        step: 'compute_ksv',
+        userId: user_id,
+        courseId: course_id,
+      })
+      timer.end({ success: false, reason: 'rpc_error' })
       throw new Error(`Failed to compute KSV: ${computeError.message}`)
     }
 
     const recordsUpdated = Array.isArray(ksvRecords) ? ksvRecords.length : 0
-
-    console.log(`[${FUNCTION_NAME}] Successfully computed KSV: ${recordsUpdated} records`)
+    timer.end({
+      success: true,
+      recordsUpdated,
+      courseCode: course.code,
+    })
 
     return successResponse({
       success: true,
@@ -124,7 +167,11 @@ serve(async (req) => {
     } as ComputeKSVResponse)
 
   } catch (error) {
-    console.error(`[${FUNCTION_NAME}] Error:`, error)
+    logError(FUNCTION_NAME, error, {
+      step: 'unhandled_error',
+      userId: (error as any)?.userId || 'unknown',
+    })
+    timer.end({ success: false, reason: 'unhandled_error' })
     return handleError(error, FUNCTION_NAME)
   }
 })

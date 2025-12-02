@@ -17,10 +17,12 @@
  */
 
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { Check, X, Clock, TrendingUp, ArrowLeft, Loader2 } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { Check, X, Clock, TrendingUp, ArrowLeft, Loader2, Sparkles } from 'lucide-react'
 import { useAuth } from '@/components/auth/AuthProvider'
-import { fetchUserExamSessions } from '@/lib/api'
+import { fetchUserExamSessions, upsertDiagnosticStatus, fetchExam } from '@/lib/api'
+import { useDiagnosticStatus } from '@/hooks/useFinals'
 import type { SubmitExamResponse } from '@/types/api'
 
 export default function ExamResults() {
@@ -28,9 +30,12 @@ export default function ExamResults() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
+  const queryClient = useQueryClient()
+  const [showGeneratingPlan, setShowGeneratingPlan] = useState(false)
 
   // Try to get results from router state (passed from ExamSimulation)
   const resultsFromState = location.state?.examResults as SubmitExamResponse | undefined
+  const isDiagnostic = location.state?.isDiagnostic === true
 
   // Fallback: fetch most recent completed session for this exam
   const {
@@ -48,6 +53,141 @@ export default function ExamResults() {
   // but we don't have the full breakdown without re-calling submit-exam
   // For now, this fallback will show basic info only
   const results = resultsFromState
+
+  // Fetch exam to get course_id (needed for diagnostic recording)
+  const { data: exam } = useQuery({
+    queryKey: ['exam', examId],
+    queryFn: () => fetchExam(examId!),
+    enabled: !!examId,
+  })
+
+  // Get courseId from multiple sources (exam, state, URL params)
+  const courseId = exam?.course_id || location.state?.courseId || undefined
+
+  // Check if diagnostic already recorded (prevent duplicates)
+  const { data: existingDiagnostic } = useDiagnosticStatus(courseId)
+  const diagnosticAlreadyRecorded = existingDiagnostic?.hasCompletedDiagnostic === true
+
+  // Mutation to record diagnostic
+  const recordDiagnosticMutation = useMutation({
+    mutationFn: async (results: SubmitExamResponse) => {
+      if (!courseId || !user) {
+        throw new Error('Missing courseId or user');
+      }
+
+      // Compute topic mastery map from performance_by_topic
+      const topicMastery: Record<string, number> = {};
+      if (results.performance_by_topic) {
+        results.performance_by_topic.forEach(topic => {
+          topicMastery[topic.topic_id] = topic.percentage / 100; // Convert to 0-1
+        });
+      }
+
+      // Upsert diagnostic status with session_id for audit trail
+      const diagnosticResult = await upsertDiagnosticStatus({
+        userId: user.id,
+        courseId: courseId,
+        completed: true,
+        score: results.score,
+        completedAt: new Date().toISOString(),
+        topicMastery: topicMastery,
+        sessionId: results.session_id, // Store session ID for audit trail
+      });
+
+      // Update user_topic_mastery from diagnostic results
+      if (results.performance_by_topic) {
+        const { supabase } = await import('@/lib/supabase');
+        for (const topic of results.performance_by_topic) {
+          const masteryScore = topic.percentage / 100; // Convert to 0-1
+          
+          // Upsert topic mastery
+          const { error: masteryError } = await supabase
+            .from('user_topic_mastery')
+            .upsert({
+              user_id: user.id,
+              course_id: courseId,
+              topic_id: topic.topic_id,
+              mastery_score: masteryScore,
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: 'user_id,topic_id'
+            });
+
+          if (masteryError) {
+            console.warn(`[ExamResults] Failed to update mastery for topic ${topic.topic_id}:`, masteryError);
+            // Don't throw - diagnostic was recorded successfully
+          }
+        }
+      }
+
+      return diagnosticResult;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['diagnostic-status'] });
+      queryClient.invalidateQueries({ queryKey: ['finals-flow'] });
+      queryClient.invalidateQueries({ queryKey: ['topic-mastery'] });
+      
+      // Show "Generating Study Plan..." message
+      setShowGeneratingPlan(true);
+      
+      // Navigate after delay
+      setTimeout(() => {
+        if (courseId) {
+          navigate(`/course/${courseId}`);
+        } else {
+          navigate('/courses');
+        }
+      }, 2500);
+    },
+    onError: (error) => {
+      console.error('[ExamResults] Failed to record diagnostic:', error);
+      // Show user-friendly error
+      alert(`Failed to record diagnostic: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try refreshing the page.`);
+    },
+  });
+
+  // Record diagnostic when results load (with retry logic)
+  useEffect(() => {
+    if (
+      isDiagnostic &&
+      results &&
+      !diagnosticAlreadyRecorded &&
+      user &&
+      !recordDiagnosticMutation.isPending &&
+      !recordDiagnosticMutation.isSuccess
+    ) {
+      // Wait for courseId to be available (from exam query or state)
+      if (!courseId) {
+        // If exam is still loading, wait a bit more
+        if (exam === undefined) {
+          return; // Still loading
+        }
+        // If exam loaded but no courseId, try to get it from results
+        console.warn('[ExamResults] courseId not available, attempting to fetch from exam');
+        return;
+      }
+
+      // Retry logic: try up to 3 times
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      const attemptRecord = async () => {
+        try {
+          await recordDiagnosticMutation.mutateAsync(results);
+        } catch (error) {
+          retryCount++;
+          if (retryCount < maxRetries) {
+            console.log(`[ExamResults] Retry ${retryCount}/${maxRetries} for diagnostic recording...`);
+            setTimeout(attemptRecord, 1000 * retryCount); // Exponential backoff
+          } else {
+            console.error('[ExamResults] Failed to record diagnostic after retries:', error);
+          }
+        }
+      };
+
+      attemptRecord();
+    }
+  }, [isDiagnostic, results, diagnosticAlreadyRecorded, user, courseId, exam]);
 
   // ==================== LOADING & ERROR STATES ====================
 
@@ -287,24 +427,52 @@ export default function ExamResults() {
           </div>
         </div>
 
+        {/* Generating Study Plan Message (for diagnostic) */}
+        {isDiagnostic && showGeneratingPlan && (
+          <div className="bg-[#F0F9FF] border border-[#BFDBFE] rounded-[14px] p-8 mb-8 text-center">
+            <div className="flex flex-col items-center gap-4">
+              <Sparkles className="w-12 h-12 text-[#2563EB] animate-pulse" />
+              <div>
+                <h3 className="text-lg font-semibold text-[#1E40AF] mb-2">
+                  Generating Your Study Plan...
+                </h3>
+                <p className="text-sm text-[#3B82F6]">
+                  We're creating a personalized daily plan based on your performance.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Actions */}
         <div className="flex gap-4 mt-8">
-          <button
-            onClick={() => navigate(`/exam/${examId}`)}
-            className="flex-1 px-8 py-4 border border-[#E5E7EB] rounded-[12px] font-medium text-[#111827] hover:bg-[#F9FAFB] transition-colors"
-          >
-            View Exam Details
-          </button>
-          <button
-            onClick={() => {
-              // Navigate back to course exams page
-              // We don't have course_id in results, so navigate to courses
-              navigate('/courses')
-            }}
-            className="flex-1 px-8 py-4 bg-[#4F46E5] text-white rounded-[12px] font-medium hover:bg-[#4338CA] transition-colors"
-          >
-            Back to Courses
-          </button>
+          {!isDiagnostic && (
+            <>
+              <button
+                onClick={() => navigate(`/exam/${examId}`)}
+                className="flex-1 px-8 py-4 border border-[#E5E7EB] rounded-[12px] font-medium text-[#111827] hover:bg-[#F9FAFB] transition-colors"
+              >
+                View Exam Details
+              </button>
+              <button
+                onClick={() => {
+                  if (courseId) {
+                    navigate(`/course/${courseId}`);
+                  } else {
+                    navigate('/courses');
+                  }
+                }}
+                className="flex-1 px-8 py-4 bg-[#4F46E5] text-white rounded-[12px] font-medium hover:bg-[#4338CA] transition-colors"
+              >
+                {courseId ? 'Back to Course' : 'Back to Courses'}
+              </button>
+            </>
+          )}
+          {isDiagnostic && !showGeneratingPlan && (
+            <div className="flex-1 text-center text-sm text-[#6B7280]">
+              Your study plan is being generated...
+            </div>
+          )}
         </div>
       </div>
     </div>

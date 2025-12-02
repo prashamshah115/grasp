@@ -32,6 +32,7 @@ import {
   ConflictError,
   ValidationError,
 } from '../_shared/errors.ts'
+import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '../_shared/rate-limit.ts'
 
 // ==================== TYPES ====================
 
@@ -123,6 +124,13 @@ serve(async (req) => {
     // This uses the CORRECT Supabase v2 pattern for Edge Functions
     const { supabase, user } = await requireAuth(req)
     console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
+
+    // Rate limiting check
+    const rateLimitResult = await checkRateLimit(user.id, RATE_LIMITS.submit_exam)
+    if (!rateLimitResult.allowed) {
+      console.log(`[${FUNCTION_NAME}] Rate limit exceeded for user:`, user.id)
+      return rateLimitResponse(rateLimitResult)
+    }
 
     // Parse and validate request body
     const body = await req.json() as SubmitExamRequest

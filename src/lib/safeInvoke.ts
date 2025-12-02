@@ -12,6 +12,7 @@
 import { supabase } from './supabase'
 import { NetworkError } from './errors'
 import { logError } from './errorHandler'
+import { logger } from './logger'
 
 interface SafeInvokeOptions {
   maxRetries?: number
@@ -78,16 +79,16 @@ export async function safeInvoke<T = any>(
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      console.log(`[safeInvoke] Attempt ${attempt + 1}/${maxRetries} for ${functionName}`)
+      logger.debug(`Safe invoke attempt ${attempt + 1}/${maxRetries}`, { functionName })
       
       const { data, error } = await supabase.functions.invoke<T>(functionName, options)
 
       if (error) {
-        console.error(`[safeInvoke] ${functionName} returned error:`, {
-          message: error.message,
+        logger.error(`Edge function returned error`, error, {
+          functionName,
+          attempt: attempt + 1,
           status: (error as any).status,
           code: (error as any).code,
-          context: (error as any).context,
         })
 
         // Check if error is retryable
@@ -97,7 +98,12 @@ export async function safeInvoke<T = any>(
           
           // Wait before retry
           const delay = calculateDelay(attempt, baseDelay)
-          console.log(`[safeInvoke] Retrying ${functionName} after ${delay}ms...`)
+          logger.info(`Retrying edge function after ${delay}ms`, {
+            functionName,
+            attempt: attempt + 1,
+            delay,
+            reason: 'retryable_error',
+          })
           await new Promise(resolve => setTimeout(resolve, delay))
           
           continue
@@ -115,19 +121,25 @@ export async function safeInvoke<T = any>(
       }
 
       if (!data) {
-        console.error(`[safeInvoke] ${functionName} returned no data`)
+        logger.error(`Edge function returned no data`, new Error('No data returned'), {
+          functionName,
+          attempt: attempt + 1,
+        })
         throw new Error(`No data returned from ${functionName}`)
       }
 
-      console.log(`[safeInvoke] ${functionName} succeeded on attempt ${attempt + 1}`)
+      logger.info(`Edge function succeeded`, {
+        functionName,
+        attempt: attempt + 1,
+      })
       return data
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
       
       // Log error with full details
-      console.error(`[safeInvoke] ${functionName} attempt ${attempt + 1} failed:`, {
-        error: lastError.message,
-        stack: lastError.stack,
+      logger.error(`Edge function attempt failed`, error, {
+        functionName,
+        attempt: attempt + 1,
         isRetryable: isRetryableError(error),
         willRetry: isRetryableError(error) && attempt < maxRetries - 1,
       })
@@ -139,7 +151,12 @@ export async function safeInvoke<T = any>(
         
         // Wait before retry
         const delay = calculateDelay(attempt, baseDelay)
-        console.log(`[safeInvoke] Retrying ${functionName} after ${delay}ms...`)
+        logger.info(`Retrying edge function after ${delay}ms`, {
+          functionName,
+          attempt: attempt + 1,
+          delay,
+          reason: 'retryable_error',
+        })
         await new Promise(resolve => setTimeout(resolve, delay))
         
         continue

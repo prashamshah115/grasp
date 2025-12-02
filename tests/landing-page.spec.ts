@@ -17,14 +17,14 @@ test.describe('Landing Page', () => {
 
   test.describe('Page Load', () => {
     test('should load successfully', async ({ page }) => {
-      await expect(page).toHaveTitle(/grasp/i);
-      await expect(page.locator('h1:has-text("grasp.ai")').first()).toBeVisible();
+      await expect(page).toHaveTitle(/novalo|grasp/i);
+      await expect(page.locator('h1:has-text("novalo.io"), h1:has-text("grasp.ai")').first()).toBeVisible();
     });
 
     test('should display brand name in header', async ({ page }) => {
-      const brand = page.locator('h1:has-text("grasp.ai")').first();
+      const brand = page.locator('h1:has-text("novalo.io"), h1:has-text("grasp.ai")').first();
       await expect(brand).toBeVisible();
-      await expect(brand).toHaveText('grasp.ai');
+      await expect(brand).toHaveText(/novalo\.io|grasp\.ai/);
     });
 
     test('should display Sign In link in top-right', async ({ page }) => {
@@ -67,7 +67,7 @@ test.describe('Landing Page', () => {
     });
 
     test('should stay on landing when clicking brand logo', async ({ page }) => {
-      const logo = page.locator('h1:has-text("grasp.ai")').first();
+      const logo = page.locator('h1:has-text("novalo.io"), h1:has-text("grasp.ai")').first();
       await logo.click();
       
       // Should still be on landing page
@@ -114,7 +114,7 @@ test.describe('Landing Page', () => {
       await page.setViewportSize({ width: 375, height: 667 });
       
       // Brand should still be visible
-      await expect(page.locator('h1:has-text("grasp.ai")').first()).toBeVisible();
+      await expect(page.locator('h1:has-text("novalo.io"), h1:has-text("grasp.ai")').first()).toBeVisible();
       
       // Headline should be visible
       await expect(page.locator('text=Ace your finals.')).toBeVisible();
@@ -127,7 +127,7 @@ test.describe('Landing Page', () => {
       await page.setViewportSize({ width: 768, height: 1024 });
       
       // Brand should still be visible
-      await expect(page.locator('h1:has-text("grasp.ai")').first()).toBeVisible();
+      await expect(page.locator('h1:has-text("novalo.io"), h1:has-text("grasp.ai")').first()).toBeVisible();
       
       // Headline should be visible
       await expect(page.locator('text=Ace your finals.')).toBeVisible();
@@ -137,7 +137,7 @@ test.describe('Landing Page', () => {
       await page.setViewportSize({ width: 1920, height: 1080 });
       
       // Brand should still be visible
-      await expect(page.locator('h1:has-text("grasp.ai")').first()).toBeVisible();
+      await expect(page.locator('h1:has-text("novalo.io"), h1:has-text("grasp.ai")').first()).toBeVisible();
       
       // Headline should be visible
       await expect(page.locator('text=Ace your finals.')).toBeVisible();

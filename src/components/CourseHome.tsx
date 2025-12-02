@@ -11,15 +11,17 @@
  * - NO props, NO mock data
  */
 
-import { Book, FileText, Zap, Target, Layers, Upload, GraduationCap } from 'lucide-react';
+import { Book, FileText, Zap, Target, Layers, Upload, GraduationCap, Calendar, Clock } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useCourse } from '@/hooks';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { useUserFinalPreferences, useFinalsFlow } from '@/hooks/useFinals';
 import LoadingScreen from './LoadingScreen';
 import { MaterialsUploadModal } from './MaterialsUploadModal';
 import { TaskCompressorCard } from './finals/TaskCompressorCard';
 import { FinalsSection } from './finals/FinalsSection';
+import { ErrorBoundary } from './errors/ErrorBoundary';
 
 export function CourseHome() {
   const { courseId } = useParams<{ courseId: string }>();
@@ -31,9 +33,28 @@ export function CourseHome() {
 
   // Fetch course data
   const { data: course, isLoading: courseLoading } = useCourse(courseId!);
+  
+  // Fetch final preferences for countdown
+  const { data: preferences } = useUserFinalPreferences(courseId);
+  const { flowStep } = useFinalsFlow(courseId);
 
   // Loading state
   const isLoading = authLoading || courseLoading;
+  
+  // Calculate days until final
+  const getDaysUntilFinal = () => {
+    if (!preferences?.final_exam_date) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const finals = new Date(preferences.final_exam_date);
+    finals.setHours(0, 0, 0, 0);
+    const diffTime = finals.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 ? diffDays : null;
+  };
+  
+  const daysUntilFinal = getDaysUntilFinal();
+  const isUrgent = daysUntilFinal !== null && daysUntilFinal <= 7 && daysUntilFinal >= 0;
 
   if (isLoading) {
     return <LoadingScreen message="Loading course..." />;
@@ -69,7 +90,8 @@ export function CourseHome() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA]">
+    <ErrorBoundary>
+      <div className="min-h-screen bg-[#FAFAFA]">
       {/* Course Hero Section with Upload Button */}
       <div className="bg-white border-b border-[#E5E7EB]">
         <div className="max-w-[1400px] mx-auto px-8 py-12">
@@ -82,7 +104,23 @@ export function CourseHome() {
               <div className="text-sm text-[#6B7280] mb-2 tracking-wide uppercase font-medium">{course.code}</div>
               <h1 className="text-5xl font-semibold tracking-tight mb-2 text-[#111827]">{course.name}</h1>
               {course.term && (
-                <div className="text-sm text-[#9CA3AF]">{course.term}</div>
+                <div className="text-sm text-[#9CA3AF] mb-2">{course.term}</div>
+              )}
+              {daysUntilFinal !== null && (
+                <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${
+                  isUrgent 
+                    ? 'bg-[#FEE2E2] text-[#991B1B] border border-[#EF4444]' 
+                    : 'bg-[#DBEAFE] text-[#1E40AF] border border-[#3B82F6]'
+                }`}>
+                  <Clock className="w-4 h-4" />
+                  <span>
+                    {daysUntilFinal === 0 
+                      ? 'Final is today!' 
+                      : daysUntilFinal === 1 
+                        ? 'Final is tomorrow' 
+                        : `${daysUntilFinal} days until final`}
+                  </span>
+                </div>
               )}
             </div>
             
@@ -215,7 +253,7 @@ export function CourseHome() {
         <div className="mb-12">
           <h2 className="text-3xl mb-3">Resources</h2>
           <p className="text-[#6B7280] mb-10">Your study materials</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <button
               onClick={() => navigate(`/course/${courseId}/finals/pack`)}
               className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
@@ -225,6 +263,39 @@ export function CourseHome() {
               </div>
               <h3 className="text-lg mb-2">Final Pack</h3>
               <p className="text-sm text-[#6B7280]">Essentials, drills & must-solve</p>
+            </button>
+            <button
+              onClick={() => {
+                if (flowStep === 'NEED_EXAM_DATE') {
+                  // Scroll to Finals Pack date picker
+                  import('./finals/FinalsSection').then((mod) => {
+                    if (typeof mod.scrollToFinalsPackDatePicker === 'function') {
+                      mod.scrollToFinalsPackDatePicker();
+                    }
+                  });
+                  return;
+                }
+
+                if (flowStep === 'NEED_DIAGNOSTIC') {
+                  navigate(`/course/${courseId}/practice?mode=diagnosis`);
+                  return;
+                }
+
+                navigate(`/course/${courseId}/finals/plan`);
+              }}
+              className="bg-white border border-[#E5E7EB] rounded-[14px] p-8 text-left hover:border-[#4F46E5] transition-all duration-200 group"
+            >
+              <div className="w-12 h-12 rounded-[12px] bg-[#DBEAFE] flex items-center justify-center mb-4 group-hover:bg-[#BFDBFE] transition-colors">
+                <Calendar className="w-6 h-6 text-[#2563EB]" />
+              </div>
+              <h3 className="text-lg mb-2">Study Plan</h3>
+              <p className="text-sm text-[#6B7280]">
+                {flowStep === 'NEED_EXAM_DATE'
+                  ? 'Set your exam date on the Finals Pack'
+                  : flowStep === 'NEED_DIAGNOSTIC'
+                  ? 'Take a quick diagnostic to unlock your plan'
+                  : 'Multi-day personalized plan'}
+              </p>
             </button>
             <button
               onClick={handleViewCheatsheet}
@@ -257,6 +328,7 @@ export function CourseHome() {
         courseId={courseId!}
         courseName={course.name}
       />
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }

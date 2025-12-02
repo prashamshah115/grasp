@@ -32,6 +32,8 @@ import {
   useUpdateFinalPreferences,
   useWeakTopics,
   useRecentTasks,
+  useStudyPlan,
+  useFinalsFlow,
   type FinalsDashboardData 
 } from '@/hooks/useFinals';
 import { useRecommendedTopics } from '@/hooks/useKnowledgeState';
@@ -39,6 +41,8 @@ import { compressTasks, formatTimeBudget, getTotalDuration, type StudyTask } fro
 import { MasteryRing } from '@/components/MasteryRing';
 import LoadingScreen from '@/components/LoadingScreen';
 import { PredictionScoreWidget } from './PredictionScoreWidget';
+import { StudyPlanGenerator } from './StudyPlanGenerator';
+import { Calendar as CalendarIcon, Sparkles, Plus } from 'lucide-react';
 
 interface FinalsCommandCenterProps {
   courseId?: string;
@@ -56,6 +60,9 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
   const { data: weakTopics } = useWeakTopics(courseId);
   const { data: recentTasks } = useRecentTasks(courseId);
   const { data: recommendedTopics, isLoading: recommendationsLoading } = useRecommendedTopics(courseId, 3);
+  const { data: studyPlan, isLoading: studyPlanLoading, refetch: refetchStudyPlan } = useStudyPlan(courseId);
+  const [showStudyPlanGenerator, setShowStudyPlanGenerator] = useState(false);
+  const { flowStep } = useFinalsFlow(courseId);
 
   // Get current course data
   const currentCourse = courseId 
@@ -63,16 +70,16 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
     : null;
 
   // Generate compressed tasks
-  const compressedTasks: StudyTask[] = courseId && weakTopics
+  const compressedTasks: StudyTask[] = courseId && weakTopics && Array.isArray(weakTopics)
     ? compressTasks({
         timeBudgetMinutes: timeBudget,
         courseId,
         topicMastery: weakTopics,
-        recentTasks: recentTasks?.map(t => ({
+        recentTasks: (recentTasks && Array.isArray(recentTasks)) ? recentTasks.map(t => ({
           task_type: t.task_type as any,
           topic_id: t.topic_id,
           completed_at: t.completed_at,
-        })) || [],
+        })) : [],
         daysUntilFinal: currentCourse?.days_until_final ?? undefined,
       })
     : [];
@@ -219,7 +226,7 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
                   <div key={i} className="animate-pulse p-4 rounded-lg border bg-gray-50 h-20"></div>
                 ))}
               </div>
-            ) : recommendedTopics && recommendedTopics.length > 0 ? (
+            ) : recommendedTopics && Array.isArray(recommendedTopics) && recommendedTopics.length > 0 ? (
               <div className="space-y-3">
                 {recommendedTopics.map((topic, index) => (
                   <div
@@ -266,6 +273,116 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
           </CardContent>
         </Card>
 
+        {/* Multi-Day Study Plan (Backend Generated) */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <CalendarIcon className="w-5 h-5 text-purple-500" />
+                Study Plan
+              </CardTitle>
+              {flowStep === 'READY' && !studyPlan && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowStudyPlanGenerator(true)}
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Generate Plan
+                </Button>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {flowStep === 'NEED_EXAM_DATE' && (
+              <div className="text-center py-8 text-muted-foreground space-y-2">
+                <Calendar className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                <p className="text-sm font-medium">Set your final exam date</p>
+                <p className="text-xs">
+                  Use the Finals Pack card on the course dashboard to choose your exam date before we
+                  generate a study plan.
+                </p>
+              </div>
+            )}
+            {flowStep === 'NEED_DIAGNOSTIC' && (
+              <div className="text-center py-8 text-muted-foreground space-y-2">
+                <Activity className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                <p className="text-sm font-medium">Take a quick diagnostic</p>
+                <p className="text-xs mb-3">
+                  We need a diagnostic test (10-15 adaptive questions) before we can build a personalized schedule.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => navigate(`/course/${courseId}/practice?mode=diagnosis`)}
+                >
+                  <Activity className="w-4 h-4 mr-2" />
+                  Start Diagnostic
+                </Button>
+              </div>
+            )}
+            {flowStep === 'READY' && (
+              <>
+                {studyPlanLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Target className="w-12 h-12 mx-auto mb-3 opacity-50 animate-pulse" />
+                    <p>Loading study plan...</p>
+                  </div>
+                ) : studyPlan ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{studyPlan.title}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {studyPlan.plan_content?.length || 0} days • Target:{' '}
+                          {studyPlan.target_date?.split('T')[0] || 'Not set'}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-sm">
+                        {studyPlan.progress_percent}% complete
+                      </Badge>
+                    </div>
+                    <Progress value={studyPlan.progress_percent} className="h-2" />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate(`/course/${courseId}/finals/plan`)}
+                        className="flex-1"
+                      >
+                        View Full Plan
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowStudyPlanGenerator(true)}
+                      >
+                        Regenerate
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground space-y-4">
+                    <Sparkles className="w-12 h-12 mx-auto opacity-50" />
+                    <div>
+                      <p className="mb-2">No study plan yet</p>
+                      <p className="text-xs">
+                        Generate a personalized multi-day study plan based on your diagnostic.
+                      </p>
+                    </div>
+                    <Button
+                      variant="default"
+                      onClick={() => setShowStudyPlanGenerator(true)}
+                    >
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Generate Study Plan
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Legacy Task Compression (keep for backward compatibility) */}
         <Card>
           <CardHeader>
@@ -296,7 +413,7 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
               </div>
             </div>
 
-            {compressedTasks.length > 0 ? (
+            {compressedTasks && Array.isArray(compressedTasks) && compressedTasks.length > 0 ? (
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">
@@ -363,6 +480,21 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
             <span>Quick Practice</span>
           </Button>
         </div>
+
+        {/* Study Plan Generator Modal */}
+        {showStudyPlanGenerator && courseId && currentCourse && (
+          <StudyPlanGenerator
+            courseId={courseId}
+            courseCode={currentCourse.course_code}
+            onClose={() => {
+              setShowStudyPlanGenerator(false);
+              refetchStudyPlan();
+            }}
+            onComplete={() => {
+              refetchStudyPlan();
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -379,7 +511,7 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
 
       {dashboard && dashboard.length > 0 ? (
         <div className="space-y-4">
-          {dashboard.map((course) => (
+          {dashboard && Array.isArray(dashboard) ? dashboard.map((course) => (
             <Card 
               key={course.course_id}
               className="hover:border-primary/50 transition-colors cursor-pointer"
@@ -418,7 +550,7 @@ export function FinalsCommandCenter({ courseId }: FinalsCommandCenterProps) {
                 />
               </CardContent>
             </Card>
-          ))}
+          )) : []}
         </div>
       ) : (
         <Card>

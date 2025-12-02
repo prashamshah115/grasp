@@ -32,6 +32,36 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
     perMinute: 2,   // Very expensive operation
     perHour: 10,
     perDay: 50
+  },
+  next_global_question: {
+    endpoint: 'next_global_question',
+    perMinute: 30,  // Users will call this frequently during practice
+    perHour: 500,
+    perDay: 5000
+  },
+  update_question_history: {
+    endpoint: 'update_question_history',
+    perMinute: 60,  // Called after each question answer
+    perHour: 1000,
+    perDay: 10000
+  },
+  update_mastery: {
+    endpoint: 'update_mastery',
+    perMinute: 20,  // Called after sessions complete
+    perHour: 200,
+    perDay: 1000
+  },
+  start_exam_session: {
+    endpoint: 'start_exam_session',
+    perMinute: 5,   // Exams shouldn't be started frequently
+    perHour: 20,
+    perDay: 50
+  },
+  submit_exam: {
+    endpoint: 'submit_exam',
+    perMinute: 5,   // Exams shouldn't be submitted frequently
+    perHour: 20,
+    perDay: 50
   }
 }
 

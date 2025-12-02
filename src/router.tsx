@@ -46,6 +46,7 @@ import ExamResults from './components/ExamResults'
 // Finals components
 import { FinalPackView } from './components/finals/FinalPackView'
 import { GradedAssignmentUpload } from './components/finals/GradedAssignmentUpload'
+import { StudyPlanView } from './components/finals/StudyPlanView'
 
 // Auth & Error components (default exports)
 import ProtectedRoute from './components/auth/ProtectedRoute'
@@ -116,6 +117,11 @@ const routes: RouteObject[] = [
           {
             path: 'finals/upload',
             element: <GradedAssignmentUpload />,
+          },
+          // Finals - Study Plan
+          {
+            path: 'finals/plan',
+            element: <StudyPlanView />,
           },
         ],
       },

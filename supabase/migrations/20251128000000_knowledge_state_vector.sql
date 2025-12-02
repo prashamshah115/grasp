@@ -172,13 +172,13 @@ BEGIN
       COALESCE(
         CASE 
           WHEN COUNT(*) > 0 THEN 
-            (COUNT(*) FILTER (WHERE NOT is_correct))::NUMERIC / COUNT(*)::NUMERIC
+            (COUNT(*) FILTER (WHERE NOT qa.is_correct))::NUMERIC / COUNT(*)::NUMERIC
           ELSE 0.0
         END,
         0.0
       ),
-      COALESCE(SUM(time_taken_sec), 0),
-      MAX(created_at)
+      COALESCE(SUM(qa.time_taken_sec), 0),
+      MAX(qa.created_at)
     INTO 
       v_error_rate,
       v_time_spent_sec,
@@ -186,7 +186,8 @@ BEGIN
     FROM question_attempts qa
     JOIN questions q ON q.id = qa.question_id
     WHERE qa.user_id = p_user_id
-      AND q.topic_id = v_topic_record.topic_id;
+      AND q.topic_id = v_topic_record.topic_id
+      AND q.course_id = p_course_id;
 
     -- Calculate graph in/out degrees
     SELECT 

@@ -81,10 +81,12 @@ export default function CourseLayout() {
       </header>
 
       {/* Course Content */}
-      <main className="flex-1 overflow-hidden">
-        <Suspense fallback={<LoadingScreen />}>
-          <Outlet />
-        </Suspense>
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <Suspense fallback={<LoadingScreen />}>
+            <Outlet />
+          </Suspense>
+        </div>
       </main>
     </div>
   )
@@ -96,6 +98,7 @@ function getPageTitle(pathname: string): string {
   if (pathname.includes('/compression')) return 'Compression'
   if (pathname.includes('/exam')) return 'Exam'
   if (pathname.includes('/finals/pack')) return 'Final Pack'
+  if (pathname.includes('/finals/plan')) return 'Study Plan'
   if (pathname.includes('/finals/upload')) return 'Upload'
   return 'Page'
 }

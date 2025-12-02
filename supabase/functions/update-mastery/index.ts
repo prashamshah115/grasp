@@ -8,9 +8,11 @@ import {
   handleError,
   handleCORS,
   successResponse,
+  requireAuth,
   ValidationError,
   isValidUUID,
 } from '../_shared/errors.ts'
+import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '../_shared/rate-limit.ts'
 
 interface UpdateMasteryRequest {
   sessionId: string
@@ -36,11 +38,16 @@ serve(async (req) => {
   }
 
   try {
-    // Init Supabase client
-    const supabase = createClient(
-      Deno.env.get('PUBLIC_SUPABASE_URL')!,
-      Deno.env.get('SERVICE_ROLE_KEY')!
-    )
+    // Authenticate user and get properly configured Supabase client
+    const { supabase, user } = await requireAuth(req)
+    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
+
+    // Rate limiting check
+    const rateLimitResult = await checkRateLimit(user.id, RATE_LIMITS.update_mastery)
+    if (!rateLimitResult.allowed) {
+      console.log(`[${FUNCTION_NAME}] Rate limit exceeded for user:`, user.id)
+      return rateLimitResponse(rateLimitResult)
+    }
 
     // Safe JSON parsing with error handling
     let body: UpdateMasteryRequest
@@ -60,20 +67,25 @@ serve(async (req) => {
     }
 
     const { sessionId } = body
-    console.log(`[${FUNCTION_NAME}] Request:`, { sessionId })
+    console.log(`[${FUNCTION_NAME}] Request:`, { sessionId, userId: user.id })
 
     // -----------------------------------------------
-    // STEP 1: Fetch session info
+    // STEP 1: Fetch session info and verify ownership
     // -----------------------------------------------
     const { data: session, error: sessionError } = await supabase
       .from('study_sessions')
       .select('user_id, topic_id, course_id')
       .eq('id', sessionId)
+      .eq('user_id', user.id) // Security: ensure user owns the session
       .single()
 
     if (sessionError) {
       console.error('[update-mastery] Session error:', sessionError)
       throw sessionError
+    }
+
+    if (!session) {
+      throw new Error('Session not found or access denied')
     }
 
     console.log('[update-mastery] Session found:', session)

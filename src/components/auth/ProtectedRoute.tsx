@@ -24,7 +24,12 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   // Redirect to landing if not authenticated
   // Save the attempted location for redirect after login
   if (!user) {
-    return <Navigate to="/" state={{ from: location }} replace />
+    // Only navigate if we're not already on the landing page to prevent loops
+    if (location.pathname !== '/') {
+      return <Navigate to="/" state={{ from: location }} replace />
+    }
+    // If already on landing page, don't redirect (prevents redirect loop)
+    return null
   }
 
   // User is authenticated, render children

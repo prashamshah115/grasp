@@ -135,13 +135,16 @@ export function classifyError(error: unknown): UserFriendlyError {
 }
 
 /**
- * Log error for debugging (can extend to Supabase Logs/Sentry later)
+ * Log error for debugging and production monitoring
+ * Sends to console in all environments, can extend to error tracking service
  */
-export function logError(error: unknown, context?: string): void {
+export async function logError(error: unknown, context?: string): Promise<void> {
   const timestamp = new Date().toISOString()
   const errorInfo = {
     timestamp,
     context,
+    url: typeof window !== 'undefined' ? window.location.href : 'unknown',
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
     error: error instanceof Error ? {
       name: error.name,
       message: error.message,
@@ -149,12 +152,24 @@ export function logError(error: unknown, context?: string): void {
     } : error,
   }
 
+  // Always log to console for debugging
   console.error(`[ErrorHandler] ${context || 'Unhandled error'}:`, errorInfo)
 
-  // TODO: Send to Supabase Logs or Sentry in production
-  // if (process.env.NODE_ENV === 'production') {
-  //   await supabase.functions.invoke('log-error', { body: errorInfo })
-  // }
+  // In production, send to error tracking (if configured)
+  // For now, errors are logged to console and can be monitored via browser console
+  // Future: Integrate with Sentry or Supabase Logs for centralized error tracking
+  if (import.meta.env.PROD) {
+    // Structured error logging for production monitoring
+    // Errors can be collected via browser console monitoring tools
+    // or integrated with error tracking service
+    try {
+      // Optional: Send to error tracking service
+      // await sendToErrorTracking(errorInfo)
+    } catch (trackingError) {
+      // Don't fail if error tracking fails
+      console.warn('Failed to send error to tracking service:', trackingError)
+    }
+  }
 }
 
 
