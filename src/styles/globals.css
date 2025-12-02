@@ -77,3 +77,37 @@ textarea {
   font-family: inherit;
   letter-spacing: -0.01em;
 }
+
+/* Markdown Content Theme (for explanations) */
+.markdown-content {
+  @apply text-[#111827] leading-relaxed;
+}
+
+.markdown-content h3 {
+  @apply text-lg font-semibold text-[#111827] mt-4 mb-2;
+}
+
+.markdown-content p {
+  @apply mb-3;
+}
+
+.markdown-content ul, 
+.markdown-content ol {
+  @apply ml-6 mb-3 space-y-1;
+}
+
+.markdown-content code {
+  @apply bg-[#F3F4F6] px-1.5 py-0.5 rounded text-sm font-mono text-[#EF4444];
+}
+
+.markdown-content pre {
+  @apply bg-[#1F2937] text-[#F9FAFB] p-4 rounded-lg mb-3 overflow-x-auto;
+}
+
+.markdown-content pre code {
+  @apply bg-transparent px-0 py-0 text-[#F9FAFB];
+}
+
+.markdown-content strong {
+  @apply font-semibold text-[#111827];
+}

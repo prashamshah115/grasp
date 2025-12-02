@@ -107,6 +107,84 @@ function answersMatch(userAnswer: any, correctAnswer: any): boolean {
          String(correctAnswer).toLowerCase().trim()
 }
 
+/**
+ * Grade Free Response Question using LLM
+ */
+async function gradeFRQ(
+  question: { prompt: string; frq_ideal_answer?: string | null; frq_rubric_md?: string | null },
+  userAnswer: string
+): Promise<{ score: number; feedback: string; confidence: number }> {
+  const apiKey = Deno.env.get('OPENAI_API_KEY')
+  if (!apiKey) {
+    console.error('[gradeFRQ] OPENAI_API_KEY not configured')
+    return { score: 0, feedback: 'Grading unavailable - requires manual review', confidence: 0 }
+  }
+
+  const prompt = `You are grading a free response exam question.
+
+Question: ${question.prompt}
+
+Ideal Answer:
+${question.frq_ideal_answer || 'No ideal answer provided'}
+
+Rubric:
+${question.frq_rubric_md || 'Grade based on accuracy and completeness'}
+
+Student Answer:
+${userAnswer}
+
+Grade this answer strictly but fairly. Return ONLY valid JSON in this exact format:
+{
+  "score": <number between 0 and 1>,
+  "feedback": "<brief feedback on what was good/missing>",
+  "confidence": <number between 0 and 1, how confident you are in this grade>
+}
+
+Scoring guidelines:
+- 1.0: Complete, accurate answer
+- 0.7-0.9: Good answer with minor gaps
+- 0.5-0.7: Partial answer
+- 0.3-0.5: Minimal understanding
+- 0.0-0.3: Incorrect or missing`
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4-turbo-preview',
+        messages: [
+          { role: 'system', content: 'You are a strict but fair exam grader. Always return valid JSON.' },
+          { role: 'user', content: prompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.3,
+        max_tokens: 500,
+      }),
+    })
+
+    if (!response.ok) {
+      console.error('[gradeFRQ] OpenAI API error:', response.status)
+      return { score: 0, feedback: 'Grading failed - requires manual review', confidence: 0 }
+    }
+
+    const data = await response.json()
+    const result = JSON.parse(data.choices[0].message.content || '{}')
+
+    return {
+      score: Math.max(0, Math.min(1, result.score || 0)),
+      feedback: result.feedback || 'No feedback provided',
+      confidence: Math.max(0, Math.min(1, result.confidence || 0.7)),
+    }
+  } catch (error) {
+    console.error('[gradeFRQ] Grading failed:', error)
+    return { score: 0, feedback: 'Grading failed - requires manual review', confidence: 0 }
+  }
+}
+
 // ==================== MAIN HANDLER ====================
 
 serve(async (req) => {
@@ -118,17 +196,13 @@ serve(async (req) => {
   }
 
   try {
-    console.log(`[${FUNCTION_NAME}] Request received`)
-
     // Authenticate user and get properly configured Supabase client
     // This uses the CORRECT Supabase v2 pattern for Edge Functions
     const { supabase, user } = await requireAuth(req)
-    console.log(`[${FUNCTION_NAME}] User authenticated:`, user.id)
 
     // Rate limiting check
     const rateLimitResult = await checkRateLimit(user.id, RATE_LIMITS.submit_exam)
     if (!rateLimitResult.allowed) {
-      console.log(`[${FUNCTION_NAME}] Rate limit exceeded for user:`, user.id)
       return rateLimitResponse(rateLimitResult)
     }
 
@@ -142,8 +216,6 @@ serve(async (req) => {
     if (!isValidUUID(session_id)) {
       throw new ValidationError('Invalid session_id format')
     }
-
-    console.log(`[${FUNCTION_NAME}] Processing session:`, session_id)
 
     // ==================== STEP 1: Load and Validate Session ====================
 
@@ -184,8 +256,6 @@ serve(async (req) => {
       throw new ConflictError('This exam has already been submitted')
     }
 
-    console.log(`[${FUNCTION_NAME}] Session validated for exam:`, session.exams.name)
-
     // ==================== STEP 2: Load User's Answers ====================
 
     const { data: answers, error: answersError } = await supabase
@@ -194,11 +264,8 @@ serve(async (req) => {
       .eq('session_id', session_id)
 
     if (answersError) {
-      console.error(`[${FUNCTION_NAME}] Answers load error:`, answersError)
       throw answersError
     }
-
-    console.log(`[${FUNCTION_NAME}] Loaded ${answers?.length || 0} answers`)
 
     // Build answer map for fast lookup
     const answerMap = new Map<string, any>()
@@ -225,6 +292,8 @@ serve(async (req) => {
           correct_answer,
           explanation,
           topic_id,
+          frq_ideal_answer,
+          frq_rubric_md,
           topics(
             id,
             name
@@ -242,23 +311,57 @@ serve(async (req) => {
     if (!examQuestions || examQuestions.length === 0) {
       throw new NotFoundError('Exam has no questions')
     }
+    
+    // ==================== STEP 3.5: Grade FRQ Questions ====================
+    
+    for (const eq of examQuestions) {
+      const question = eq.questions
+      if (question.q_type === 'short' || question.q_type === 'long') {
+        const userAnswer = answerMap.get(question.id)
+        if (userAnswer && typeof userAnswer === 'string' && userAnswer.trim()) {
+          const grading = await gradeFRQ(question, userAnswer)
+          
+          // Store grading in answer map for later use
+          const answerRecord = answers?.find(a => a.question_id === question.id)
+          if (answerRecord) {
+            (answerRecord as any).frq_score = grading.score
+            (answerRecord as any).frq_feedback = grading.feedback
+            (answerRecord as any).frq_confidence = grading.confidence
+          }
+          
+          // Update exam_answers with FRQ grading
+          await supabase
+            .from('exam_answers')
+            .update({
+              frq_score: grading.score,
+              frq_feedback: grading.feedback,
+              frq_confidence: grading.confidence,
+            })
+            .eq('session_id', session_id)
+            .eq('question_id', question.id)
+        }
+      }
+    }
 
-    console.log(`[${FUNCTION_NAME}] Loaded ${examQuestions.length} questions`)
+    // ==================== STEP 4: Score Each Question (MCQ + FRQ Weighted) ====================
 
-    // ==================== STEP 4: Score Each Question ====================
-
+    let mcqCorrect = 0
+    let mcqTotal = 0
+    let frqScoreSum = 0
+    let frqTotal = 0
     let correctCount = 0
     let incorrectCount = 0
     let unansweredCount = 0
     let pointsEarned = 0
     let pointsPossible = 0
     const breakdown: QuestionBreakdown[] = []
-    const topicPerformance = new Map<string, { correct: number; total: number; name: string }>()
+    const topicPerformance = new Map<string, { correct: number; total: number; frqSum: number; frqCount: number; name: string }>()
 
     for (const [index, eq] of examQuestions.entries()) {
       const question = eq.questions
       const userAnswer = answerMap.get(question.id)
       const pointsForQuestion = eq.points || 1
+      const answerRecord = answers?.find(a => a.question_id === question.id)
 
       pointsPossible += pointsForQuestion
 
@@ -269,29 +372,57 @@ serve(async (req) => {
         unansweredCount++
       }
 
-      // Score the answer
-      const isCorrect = isAnswered && answersMatch(userAnswer, question.correct_answer)
+      let isCorrect = false
+      let questionScore = 0
+
+      // Score based on question type
+      if (question.q_type === 'mcq') {
+        // MCQ scoring - binary correct/incorrect
+        mcqTotal++
+        isCorrect = isAnswered && answersMatch(userAnswer, question.correct_answer)
+        if (isCorrect) {
+          mcqCorrect++
+          questionScore = 1
+        }
+      } else {
+        // FRQ scoring - normalized 0-1 score
+        frqTotal++
+        const frqScore = (answerRecord as any)?.frq_score
+        if (frqScore !== undefined && frqScore !== null) {
+          frqScoreSum += frqScore
+          questionScore = frqScore
+          isCorrect = frqScore >= 0.7 // Consider 70%+ as "correct" for stats
+        }
+      }
 
       if (isCorrect) {
         correctCount++
-        pointsEarned += pointsForQuestion
+        pointsEarned += pointsForQuestion * questionScore
       } else if (isAnswered) {
         incorrectCount++
+        pointsEarned += pointsForQuestion * questionScore // Partial credit for FRQ
       }
 
-      // Track topic performance
+      // Track topic performance (with FRQ scores)
       const topicId = question.topic_id
       if (topicId) {
         if (!topicPerformance.has(topicId)) {
           topicPerformance.set(topicId, {
             correct: 0,
             total: 0,
+            frqSum: 0,
+            frqCount: 0,
             name: question.topics?.name || 'Unknown Topic'
           })
         }
         const topicStats = topicPerformance.get(topicId)!
-        topicStats.total++
-        if (isCorrect) topicStats.correct++
+        if (question.q_type === 'mcq') {
+          topicStats.total++
+          if (isCorrect) topicStats.correct++
+        } else {
+          topicStats.frqCount++
+          topicStats.frqSum += questionScore
+        }
       }
 
       // Add to breakdown
@@ -305,20 +436,22 @@ serve(async (req) => {
         correct_answer: question.correct_answer,
         explanation: question.explanation,
         topic_id: question.topic_id,
-        points_earned: isCorrect ? pointsForQuestion : 0,
+        points_earned: pointsForQuestion * questionScore,
         points_possible: pointsForQuestion,
       })
     }
 
-    // Calculate final score percentage
-    const score = pointsPossible > 0 ? (pointsEarned / pointsPossible) * 100 : 0
-
-    console.log(`[${FUNCTION_NAME}] Scoring complete:`, {
-      score: score.toFixed(2),
-      correct: correctCount,
-      incorrect: incorrectCount,
-      unanswered: unansweredCount,
-    })
+    // Calculate final score percentage with weighted formula (70% MCQ, 30% FRQ)
+    let score = 0
+    if (mcqTotal > 0 && frqTotal > 0) {
+      const mcqScore = mcqCorrect / mcqTotal
+      const frqScore = frqScoreSum / frqTotal
+      score = (0.7 * mcqScore + 0.3 * frqScore) * 100
+    } else if (mcqTotal > 0) {
+      score = (mcqCorrect / mcqTotal) * 100
+    } else if (frqTotal > 0) {
+      score = (frqScoreSum / frqTotal) * 100
+    }
 
     // ==================== STEP 5: Calculate Time Taken ====================
 
@@ -331,8 +464,6 @@ serve(async (req) => {
     const elapsedSec = timeTakenSec
     const originalDurationSec = session.exams.duration_min * 60
     const remainingSec = Math.max(0, originalDurationSec - elapsedSec)
-
-    console.log(`[${FUNCTION_NAME}] Time taken: ${timeTakenSec}s (${Math.floor(timeTakenSec / 60)}m)`)
 
     // ==================== STEP 6: Update Exam Session ====================
 
@@ -347,11 +478,8 @@ serve(async (req) => {
       .eq('id', session_id)
 
     if (updateError) {
-      console.error(`[${FUNCTION_NAME}] Session update error:`, updateError)
       throw updateError
     }
-
-    console.log(`[${FUNCTION_NAME}] Session updated successfully`)
 
     // ==================== STEP 7: Record Question Attempts (for spaced repetition) ====================
 
@@ -386,24 +514,77 @@ serve(async (req) => {
         .insert(attempts)
 
       if (attemptsError) {
-        console.warn(`[${FUNCTION_NAME}] Could not record attempts:`, attemptsError)
         // Don't fail the submission if this fails
-      } else {
-        console.log(`[${FUNCTION_NAME}] Recorded ${attempts.length} question attempts`)
       }
     }
 
-    // ==================== STEP 8: Build Performance by Topic ====================
+    // ==================== STEP 8: Build Performance by Topic (with FRQ) ====================
 
     const performanceByTopic = Array.from(topicPerformance.entries()).map(
-      ([topicId, stats]) => ({
-        topic_id: topicId,
-        topic_name: stats.name,
-        correct: stats.correct,
-        total: stats.total,
-        percentage: stats.total > 0 ? (stats.correct / stats.total) * 100 : 0,
-      })
+      ([topicId, stats]) => {
+        // Calculate topic score with weighted formula if both MCQ and FRQ present
+        let topicPercentage = 0
+        if (stats.total > 0 && stats.frqCount > 0) {
+          const mcqScore = stats.correct / stats.total
+          const frqScore = stats.frqSum / stats.frqCount
+          topicPercentage = (0.7 * mcqScore + 0.3 * frqScore) * 100
+        } else if (stats.total > 0) {
+          topicPercentage = (stats.correct / stats.total) * 100
+        } else if (stats.frqCount > 0) {
+          topicPercentage = (stats.frqSum / stats.frqCount) * 100
+        }
+        
+        return {
+          topic_id: topicId,
+          topic_name: stats.name,
+          correct: stats.correct,
+          total: stats.total + stats.frqCount,
+          percentage: topicPercentage,
+        }
+      }
     )
+    
+    // ==================== STEP 8.5: Save Diagnostic Status (if diagnostic exam) ====================
+    
+    // Check if this is a diagnostic exam
+    const { data: examSession, error: examSessionError } = await supabase
+      .from('exam_sessions')
+      .select('is_diagnostic')
+      .eq('id', session_id)
+      .single()
+    
+    if (!examSessionError && examSession?.is_diagnostic === true) {
+      // Build topic_mastery JSON
+      const topicMastery: Record<string, number> = {}
+      for (const [topicId, stats] of topicPerformance.entries()) {
+        const mcqScore = stats.total > 0 ? stats.correct / stats.total : 0
+        const frqScore = stats.frqCount > 0 ? stats.frqSum / stats.frqCount : 0
+        
+        // Weighted score (70% MCQ, 30% FRQ)
+        topicMastery[topicId] = stats.total > 0 && stats.frqCount > 0
+          ? (0.7 * mcqScore + 0.3 * frqScore)
+          : stats.total > 0 ? mcqScore : frqScore
+      }
+      
+      // Upsert diagnostic_status
+      const { error: diagnosticError } = await supabase
+        .from('diagnostic_status')
+        .upsert({
+          user_id: user.id,
+          course_id: session.exams.course_id,
+          completed: true,
+          score: score / 100, // Store as 0-1
+          completed_at: new Date().toISOString(),
+          topic_mastery: topicMastery,
+          diagnostic_session_id: session_id,
+        }, {
+          onConflict: 'user_id,course_id'
+        })
+      
+      if (diagnosticError) {
+        // Don't fail the submission
+      }
+    }
 
     // ==================== STEP 9: Build Response ====================
 
@@ -422,8 +603,6 @@ serve(async (req) => {
       breakdown,
       performance_by_topic: performanceByTopic,
     }
-
-    console.log(`[${FUNCTION_NAME}] Success - Final score: ${score.toFixed(2)}%`)
 
     return successResponse(response, 200)
 

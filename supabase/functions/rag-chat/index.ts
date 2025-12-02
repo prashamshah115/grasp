@@ -80,7 +80,6 @@ async function getOrCreateThread(
         .maybeSingle()
 
       if (existing) {
-        console.log('[rag-chat] Found existing thread:', existing.id)
         return existing.id
       }
     }
@@ -102,7 +101,6 @@ async function getOrCreateThread(
       return null
     }
 
-    console.log('[rag-chat] Created new thread:', newThread.id)
     return newThread.id
   } catch (err) {
     console.error('[rag-chat] Thread error:', err)
@@ -340,14 +338,6 @@ serve(async (req) => {
     const normalizedCourseId = courseId && courseId.trim() !== '' ? courseId : null
     const normalizedQuestionId = questionId && questionId.trim() !== '' ? questionId : null
 
-    console.log(`[${FUNCTION_NAME}] Request:`, {
-      userId: user.id,
-      topicId: normalizedTopicId,
-      courseId: normalizedCourseId,
-      questionId: normalizedQuestionId,
-      threadId: thread_id,
-      message: message.substring(0, 80)
-    })
 
     // ------------------------------------------
     // THREAD PERSISTENCE (non-blocking)
@@ -374,7 +364,6 @@ serve(async (req) => {
     // ------------------------------------------
     let questionPrompt: string | null = null
     if (normalizedQuestionId) {
-      console.log(`[rag-chat] Fetching question context for: ${normalizedQuestionId}`)
       const { data: question } = await supabase
         .from('questions')
         .select('prompt')
@@ -382,11 +371,6 @@ serve(async (req) => {
         .maybeSingle()
       if (question) {
         questionPrompt = question.prompt || null
-        console.log(`[rag-chat] Question context loaded:`, {
-          prompt: questionPrompt ? questionPrompt.substring(0, 100) : null
-        })
-      } else {
-        console.warn(`[rag-chat] Question not found: ${normalizedQuestionId}`)
       }
     }
 
@@ -418,7 +402,6 @@ serve(async (req) => {
     // ------------------------------------------
     // STEP 2 — VECTOR SEARCH (RPC)
     // ------------------------------------------
-    console.log('[rag-chat] Searching documents...')
 
     // Check if user is enrolled in the course (if courseId provided)
     let isEnrolled = false
@@ -430,9 +413,35 @@ serve(async (req) => {
         .eq('course_id', normalizedCourseId)
         .maybeSingle()
       isEnrolled = !!enrollment
-      console.log(`[rag-chat] User enrollment check for course ${normalizedCourseId}:`, isEnrolled)
     }
 
+    // Fetch explicit content if questionId provided (PRIORITIZED)
+    let explicitContext = ''
+    if (questionId) {
+      try {
+        const { data: question, error: questionError } = await supabase
+          .from('questions')
+          .select('explanation_md, primary_source_type, primary_source_locator')
+          .eq('id', questionId)
+          .single()
+        
+        if (!questionError && question?.explanation_md) {
+          explicitContext = `
+
+📚 FROM COURSE MATERIALS:
+${question.explanation_md}
+
+Source: ${question.primary_source_type || 'Course material'} - ${question.primary_source_locator || 'See materials'}
+
+---
+
+`
+        }
+      } catch (error) {
+        // Silent fail for explicit content fetch
+      }
+    }
+    
     // Try vector search - RLS policies will handle access control
     // The RPC function should return documents where user has access (public, own, or enrolled course)
     timer.checkpoint('vector_search_start')
@@ -449,7 +458,7 @@ serve(async (req) => {
           filter_topic_id: normalizedTopicId,
           filter_user_id: user.id, // Pass user ID but RLS will allow access to public/enrolled docs
           match_threshold: 0.6, // Lower threshold to get more results
-          match_count: 15 // Increase count
+          match_count: 3 // REDUCED: Only top 3 for cost optimization
         }
       )
       const searchDuration = Date.now() - searchStartTime
@@ -501,10 +510,9 @@ serve(async (req) => {
 
         if (!webError && webResults) {
           externalResults = webResults
-          console.log('[rag-chat] Found', externalResults.length, 'external web results')
         }
       } catch (webErr) {
-        console.warn('[rag-chat] External search failed (continuing):', webErr)
+        // Silent fail for external search
       }
     }
 
@@ -522,27 +530,33 @@ serve(async (req) => {
 
         if (!koError && kos) {
           knowledgeObjects = kos
-          console.log('[rag-chat] Found', knowledgeObjects.length, 'knowledge objects')
         }
       } catch (koErr) {
-        console.warn('[rag-chat] Knowledge objects fetch failed (continuing):', koErr)
+        // Silent fail for knowledge objects fetch
       }
     }
 
-    // No matching pages → log but continue to LLM call (LLM can use its knowledge)
-    if (!pages || pages.length === 0) {
-      console.log(`[rag-chat] No course materials found, will use LLM knowledge with course/question context`)
-    }
+    // No matching pages → continue to LLM call (LLM can use its knowledge)
 
     // ------------------------------------------
-    // STEP 3 — Build LLM context block (course materials + web + knowledge objects)
+    // STEP 3 — Build LLM context block (EXPLICIT CONTENT FIRST, then course materials)
     // ------------------------------------------
+    const hasExplicitContent = explicitContext.length > 0
     const hasMaterials = pages && pages.length > 0
     const hasWebResults = externalResults && externalResults.length > 0
     const hasKnowledgeObjects = knowledgeObjects && knowledgeObjects.length > 0
     
-    // Course materials context
-    const courseContext = hasMaterials
+    // Course materials context (explicit content prioritized)
+    const courseContext = hasExplicitContent
+      ? explicitContext + (hasMaterials 
+          ? '\n📚 Additional References:\n\n' + pages
+              .map(
+                (p: any, i: number) =>
+                  `[Source ${i + 1}: ${p.doc_title}, Page ${p.page_number}]\n${p.content}`
+              )
+              .join('\n\n---\n\n')
+          : '')
+      : hasMaterials
       ? pages
           .map(
             (p: any, i: number) =>
@@ -600,9 +614,8 @@ serve(async (req) => {
             userMemory[m.memory_key] = m.memory_value
           })
         }
-        console.log(`[rag-chat] Loaded ${Object.keys(userMemory).length} memory entries`)
       } catch (memoryError) {
-        console.warn(`[rag-chat] Failed to fetch user memory (non-critical):`, memoryError)
+        // Silent fail for user memory fetch
       }
     }
     
@@ -631,9 +644,8 @@ serve(async (req) => {
             })
             .filter(Boolean) as string[]
         }
-        console.log(`[rag-chat] Found ${weakTopics.length} weak topics`)
       } catch (masteryError) {
-        console.warn(`[rag-chat] Failed to fetch mastery (non-critical):`, masteryError)
+        // Silent fail for mastery fetch
       }
     }
     
@@ -657,9 +669,8 @@ serve(async (req) => {
               content: m.content
             }))
         }
-        console.log(`[rag-chat] Loaded ${conversationHistory.length} messages from history`)
       } catch (historyError) {
-        console.warn(`[rag-chat] Failed to fetch conversation history (non-critical):`, historyError)
+        // Silent fail for conversation history fetch
       }
     }
     
@@ -838,9 +849,8 @@ Be direct and helpful. Get to the point quickly.`
             duration_ms: llmDuration,
           },
         })
-      console.log('[rag-chat] LLM usage tracked')
     } catch (usageError) {
-      console.warn('[rag-chat] Failed to track LLM usage (non-critical):', usageError)
+      // Silent fail for usage tracking
     }
 
     // ------------------------------------------
@@ -870,12 +880,10 @@ Be direct and helpful. Get to the point quickly.`
           .insert(ragContexts)
         
         if (ragError) {
-          console.warn('[rag-chat] Failed to save RAG contexts (non-critical):', ragError)
-        } else {
-          console.log(`[rag-chat] Saved ${ragContexts.length} RAG contexts for message ${assistantMessageId}`)
+          // Silent fail for RAG context save
         }
       } catch (ragSaveError) {
-        console.warn('[rag-chat] RAG context save error (non-critical):', ragSaveError)
+        // Silent fail for RAG context save
       }
     }
 

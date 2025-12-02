@@ -23,6 +23,7 @@ import { Check, X, Clock, TrendingUp, ArrowLeft, Loader2, Sparkles } from 'lucid
 import { useAuth } from '@/components/auth/AuthProvider'
 import { fetchUserExamSessions, upsertDiagnosticStatus, fetchExam } from '@/lib/api'
 import { useDiagnosticStatus } from '@/hooks/useFinals'
+import { DiagnosticResults } from '@/components/finals/DiagnosticResults'
 import type { SubmitExamResponse } from '@/types/api'
 
 export default function ExamResults() {
@@ -114,7 +115,6 @@ export default function ExamResults() {
             });
 
           if (masteryError) {
-            console.warn(`[ExamResults] Failed to update mastery for topic ${topic.topic_id}:`, masteryError);
             // Don't throw - diagnostic was recorded successfully
           }
         }
@@ -140,7 +140,6 @@ export default function ExamResults() {
       }, 2500);
     },
     onError: (error) => {
-      console.error('[ExamResults] Failed to record diagnostic:', error);
       // Show user-friendly error
       alert(`Failed to record diagnostic: ${error instanceof Error ? error.message : 'Unknown error'}\n\nPlease try refreshing the page.`);
     },
@@ -163,7 +162,6 @@ export default function ExamResults() {
           return; // Still loading
         }
         // If exam loaded but no courseId, try to get it from results
-        console.warn('[ExamResults] courseId not available, attempting to fetch from exam');
         return;
       }
 
@@ -177,7 +175,6 @@ export default function ExamResults() {
         } catch (error) {
           retryCount++;
           if (retryCount < maxRetries) {
-            console.log(`[ExamResults] Retry ${retryCount}/${maxRetries} for diagnostic recording...`);
             setTimeout(attemptRecord, 1000 * retryCount); // Exponential backoff
           } else {
             console.error('[ExamResults] Failed to record diagnostic after retries:', error);
@@ -226,10 +223,35 @@ export default function ExamResults() {
     return null
   }
 
-  // ==================== RENDER ====================
-
+  // Destructure results early for use in both diagnostic and regular views
   const { score, correct_count, total_questions, time_taken_sec, breakdown, performance_by_topic } =
     results
+
+  // ==================== DIAGNOSTIC RESULTS VIEW ====================
+  
+  if (isDiagnostic && courseId && performance_by_topic && performance_by_topic.length > 0) {
+    // Build topic names map from performance data
+    const topicNames: Record<string, string> = {}
+    const topicMastery: Record<string, number> = {}
+    
+    performance_by_topic.forEach(topic => {
+      topicNames[topic.topic_id] = topic.topic_name
+      topicMastery[topic.topic_id] = topic.percentage / 100 // Convert to 0-1
+    })
+    
+    return (
+      <div className="min-h-screen bg-[#F9FAFB] py-12">
+        <DiagnosticResults
+          score={score / 100} // Convert to 0-1
+          topicMastery={topicMastery}
+          courseId={courseId}
+          topicNames={topicNames}
+        />
+      </div>
+    )
+  }
+
+  // ==================== REGULAR EXAM RESULTS VIEW ====================
 
   const timeMinutes = Math.floor(time_taken_sec / 60)
   const timeSeconds = time_taken_sec % 60

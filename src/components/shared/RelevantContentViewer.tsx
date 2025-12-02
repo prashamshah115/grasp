@@ -12,6 +12,7 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { X, ChevronLeft, ChevronRight, BookOpen, FileText, Loader2, AlertCircle, Sparkles, Target, Lightbulb } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
 import type { RelevantContentResponse } from '@/lib/api'
 
 interface RelevantContentViewerProps {
@@ -21,6 +22,12 @@ interface RelevantContentViewerProps {
   isLoading: boolean
   error: Error | null
   courseName?: string
+  question?: {
+    explanation_md?: string | null
+    primary_source_type?: 'slide' | 'notes' | 'textbook' | 'handout' | null
+    primary_source_id?: string | null
+    primary_source_locator?: string | null
+  }
 }
 
 export function RelevantContentViewer({
@@ -29,12 +36,14 @@ export function RelevantContentViewer({
   data,
   isLoading,
   error,
-  courseName = 'Course Materials'
+  courseName = 'Course Materials',
+  question
 }: RelevantContentViewerProps) {
   const [currentIndex, setCurrentIndex] = useState(0)
 
   const chunks = data?.chunks || []
   const totalChunks = chunks.length
+  const hasExplicitContent = !!(question?.explanation_md || question?.primary_source_locator)
 
   // Organize content by document and relevance - USEFUL STRUCTURE
   const organizedContent = useMemo(() => {
@@ -172,6 +181,63 @@ export function RelevantContentViewer({
         {/* Content Area - Production Grade */}
         <div className="flex-1 overflow-auto bg-gradient-to-b from-[#FAFAFA] to-[#F3F4F6] p-8">
           <div className="max-w-4xl mx-auto space-y-6">
+            {/* EXPLICIT CONTENT - ALWAYS FIRST */}
+            {question?.explanation_md && (
+              <div className="bg-[#EEF2FF] border-l-4 border-[#4F46E5] p-6 rounded-r-lg shadow-lg">
+                <div className="flex items-start gap-3 mb-3">
+                  <Sparkles className="w-5 h-5 text-[#4F46E5] flex-shrink-0 mt-1" />
+                  <h3 className="text-lg font-semibold text-[#111827]">Explanation</h3>
+                </div>
+                <div className="markdown-content prose prose-sm max-w-none">
+                  <ReactMarkdown>{question.explanation_md}</ReactMarkdown>
+                </div>
+              </div>
+            )}
+
+            {/* PRIMARY SOURCE CARD */}
+            {question?.primary_source_locator && (
+              <div className="bg-white border border-[#E5E7EB] rounded-lg p-5 shadow-lg">
+                <div className="flex items-center gap-3 mb-2">
+                  <BookOpen className="w-5 h-5 text-[#4F46E5]" />
+                  <span className="font-medium text-[#111827]">Primary Source</span>
+                </div>
+                <div className="text-sm text-[#6B7280] mb-3">
+                  {question.primary_source_type && (
+                    <span className="inline-block px-2 py-1 bg-[#F3F4F6] rounded mr-2">
+                      {question.primary_source_type}
+                    </span>
+                  )}
+                  {question.primary_source_locator}
+                </div>
+                {question.primary_source_id && (
+                  <a
+                    href={question.primary_source_id}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-[#4F46E5] hover:text-[#4338CA] font-medium"
+                  >
+                    Open Source →
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* Divider before vector content */}
+            {hasExplicitContent && chunks.length > 0 && (
+              <div className="flex items-center gap-3 mb-6 text-sm text-[#6B7280]">
+                <div className="flex-1 h-px bg-[#E5E7EB]" />
+                <span>📚 Additional References</span>
+                <div className="flex-1 h-px bg-[#E5E7EB]" />
+              </div>
+            )}
+
+            {/* Show notice if no explicit content */}
+            {!hasExplicitContent && !isLoading && (
+              <div className="text-sm text-[#9CA3AF] italic mb-4 text-center py-2">
+                Using similarity search - exact references coming soon
+              </div>
+            )}
+
             {/* Loading State - Production Grade */}
             {isLoading && (
               <div className="bg-white rounded-[16px] shadow-xl border border-[#E5E7EB] p-16 text-center">

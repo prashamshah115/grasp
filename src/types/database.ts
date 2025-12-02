@@ -156,6 +156,12 @@ export interface Database {
           source_ref: string | null
           created_at: string
           is_exam_only: boolean
+          explanation_md: string | null
+          primary_source_type: 'slide' | 'notes' | 'textbook' | 'handout' | null
+          primary_source_id: string | null
+          primary_source_locator: string | null
+          frq_ideal_answer: string | null
+          frq_rubric_md: string | null
         }
         Insert: {
           id?: string
@@ -171,6 +177,12 @@ export interface Database {
           source_ref?: string | null
           created_at?: string
           is_exam_only?: boolean
+          explanation_md?: string | null
+          primary_source_type?: 'slide' | 'notes' | 'textbook' | 'handout' | null
+          primary_source_id?: string | null
+          primary_source_locator?: string | null
+          frq_ideal_answer?: string | null
+          frq_rubric_md?: string | null
         }
         Update: {
           id?: string
@@ -186,6 +198,12 @@ export interface Database {
           source_ref?: string | null
           created_at?: string
           is_exam_only?: boolean
+          explanation_md?: string | null
+          primary_source_type?: 'slide' | 'notes' | 'textbook' | 'handout' | null
+          primary_source_id?: string | null
+          primary_source_locator?: string | null
+          frq_ideal_answer?: string | null
+          frq_rubric_md?: string | null
         }
       }
       study_sessions: {
@@ -420,6 +438,9 @@ export interface Database {
           is_flagged: boolean
           created_at: string
           updated_at: string
+          frq_score: number | null
+          frq_feedback: string | null
+          frq_confidence: number | null
         }
         Insert: {
           id?: string
@@ -431,6 +452,9 @@ export interface Database {
           is_flagged?: boolean
           created_at?: string
           updated_at?: string
+          frq_score?: number | null
+          frq_feedback?: string | null
+          frq_confidence?: number | null
         }
         Update: {
           id?: string
@@ -442,6 +466,9 @@ export interface Database {
           is_flagged?: boolean
           created_at?: string
           updated_at?: string
+          frq_score?: number | null
+          frq_feedback?: string | null
+          frq_confidence?: number | null
         }
       }
       exam_sessions: {

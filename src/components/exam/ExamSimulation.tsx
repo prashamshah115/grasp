@@ -30,7 +30,7 @@ import { useState, useEffect } from 'react'
 import { useDebouncedCallback } from 'use-debounce'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Flag, ChevronLeft, ChevronRight, Loader2, AlertCircle, BookOpen, CheckCircle2, XCircle } from 'lucide-react'
+import { Flag, ChevronLeft, ChevronRight, Loader2, AlertCircle, BookOpen } from 'lucide-react'
 import { useAuth } from '@/components/auth/AuthProvider'
 import {
   fetchExamSessionWithQuestions,
@@ -218,7 +218,6 @@ export function ExamSimulation() {
     retry: 3, // Increased retries
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000), // Exponential backoff
     onSuccess: (data, variables) => {
-      console.log('[ExamSimulation] Answer saved successfully:', variables.questionId)
       setSaveStatus({ questionId: variables.questionId, status: 'saved' })
       setFailedSaves((prev) => {
         const next = new Set(prev)
@@ -235,7 +234,6 @@ export function ExamSimulation() {
       }, 2000)
     },
     onError: (error, variables) => {
-      console.error('[ExamSimulation] Failed to save answer:', error, variables)
       setSaveStatus({ questionId: variables.questionId, status: 'error' })
       setFailedSaves((prev) => new Set(prev).add(variables.questionId))
     },
@@ -248,8 +246,7 @@ export function ExamSimulation() {
       saveAnswerMutation.mutate(
         { questionId, answer, isFlagged },
         {
-          onError: (error) => {
-            console.error('[ExamSimulation] Failed to save answer after debounce:', error)
+          onError: () => {
             // Retry once more after error
             setTimeout(() => {
               saveAnswerMutation.mutate({ questionId, answer, isFlagged })
@@ -293,7 +290,6 @@ export function ExamSimulation() {
           // Use backup if it's recent (within 5 minutes) and session time is null or older
           if (Date.now() - backup.timestamp < 5 * 60 * 1000) {
             if (session.time_remaining_sec === null || backup.time_remaining_sec < session.time_remaining_sec) {
-              console.log('[ExamSimulation] Restoring time from localStorage backup:', backup.time_remaining_sec)
               setTimeRemainingSec(backup.time_remaining_sec)
               // Update database with backup time
               updateTimeMutation.mutate(backup.time_remaining_sec)
@@ -311,7 +307,6 @@ export function ExamSimulation() {
       // Use session time_remaining_sec
       if (session.time_remaining_sec !== undefined && timeRemainingSec === null) {
         setTimeRemainingSec(session.time_remaining_sec)
-        console.log('[ExamSimulation] Initialized time from session:', session.time_remaining_sec)
       }
     }
   }, [session, sessionId, timeRemainingSec, updateTimeMutation])
@@ -327,9 +322,8 @@ export function ExamSimulation() {
             time_remaining_sec: timeRemainingSec,
             timestamp: Date.now()
           }))
-          console.log('[ExamSimulation] Saved time to localStorage on beforeunload:', timeRemainingSec)
         } catch (error) {
-          console.error('[ExamSimulation] Failed to save to localStorage:', error)
+          // Silent fail for localStorage backup
         }
       }
     }
@@ -358,7 +352,6 @@ export function ExamSimulation() {
   useEffect(() => {
     const handleFocus = () => {
       if (failedSaves.size > 0) {
-        console.log('[ExamSimulation] Window focused, retrying failed saves:', Array.from(failedSaves))
         // Retry all failed saves
         failedSaves.forEach((questionId) => {
           const answer = answers[questionId]
@@ -417,7 +410,7 @@ export function ExamSimulation() {
       writeExamEvent(sessionId!, 'navigate', {
         fromIndex,
         toIndex,
-      }).catch((err: any) => console.error('[ExamSimulation] Failed to write navigate event:', err))
+      }).catch(() => {}) // Silent fail for event logging
       
       setCurrentQuestionIndex(toIndex)
     }
@@ -442,7 +435,7 @@ export function ExamSimulation() {
       writeExamEvent(sessionId!, 'navigate', {
         fromIndex,
         toIndex,
-      }).catch((err: any) => console.error('[ExamSimulation] Failed to write navigate event:', err))
+      }).catch(() => {}) // Silent fail for event logging
       
       setCurrentQuestionIndex(toIndex)
     }
@@ -453,7 +446,6 @@ export function ExamSimulation() {
     
     // Validate question number is within bounds
     if (questionNumber < 1 || questionNumber > session.questions.length) {
-      console.error('[ExamSimulation] Invalid question number:', questionNumber)
       return
     }
     
@@ -487,15 +479,9 @@ export function ExamSimulation() {
 
   const handleSubmitExam = async () => {
     if (!session || isSubmitting) {
-      console.warn('[ExamSimulation] Cannot submit:', { 
-        hasSession: !!session, 
-        isSubmitting,
-        sessionId 
-      })
       return
     }
 
-    console.log('[ExamSimulation] Starting exam submission process...')
     setIsSubmitting(true)
 
     try {
@@ -521,8 +507,7 @@ export function ExamSimulation() {
                 { questionId: question.id, answer: answers[question.id], isFlagged },
                 {
                   onSuccess: () => resolve(),
-                  onError: (error) => {
-                    console.error(`[ExamSimulation] Failed to save answer for question ${question.id}:`, error)
+                  onError: () => {
                     // Don't reject - continue with submission even if some saves fail
                     resolve()
                   },
@@ -535,7 +520,6 @@ export function ExamSimulation() {
 
       // Step 3: Retry failed saves
       if (failedSaves.size > 0) {
-        console.log('[ExamSimulation] Retrying failed saves before submission:', Array.from(failedSaves))
         for (const questionId of failedSaves) {
           if (answers[questionId]) {
             const question = session.questions.find((q) => q.id === questionId)
@@ -570,8 +554,7 @@ export function ExamSimulation() {
       // Step 4: Write submit event
       await writeExamEvent(sessionId!, 'submit', {
         submittedAt: new Date().toISOString(),
-      }).catch((err: any) => {
-        console.error('[ExamSimulation] Failed to write submit event:', err)
+      }).catch(() => {
         // Non-blocking: continue with submission even if event write fails
       })
       
@@ -582,60 +565,25 @@ export function ExamSimulation() {
         throw new Error('Cannot submit: Session ID is missing')
       }
       
-      console.log('[ExamSimulation] Submitting exam session:', sessionIdToSubmit)
-      console.log('[ExamSimulation] Session object:', { 
-        session_id: session?.session_id, 
-        sessionId: sessionId,
-        exam_id: session?.exam?.id 
-      })
-      
-      console.log('[ExamSimulation] Calling submitExamMutation with:', {
-        session_id: sessionIdToSubmit
-      })
-      
       const result = await submitExamMutation.mutateAsync({
         session_id: sessionIdToSubmit,
       })
 
-      console.log('[ExamSimulation] Submission response received:', {
-        hasResult: !!result,
-        success: result?.success,
-        session_id: result?.session_id,
-        exam_name: result?.exam_name,
-        score: result?.score,
-        total_questions: result?.total_questions,
-        fullResult: result
-      })
-
       // Validate submission response before navigating
       if (!result) {
-        console.error('[ExamSimulation] No result returned from mutation')
         throw new Error('Exam submission failed: No response from server')
       }
 
       // Note: result.success is always true in SubmitExamResponse type, but check anyway
       if (result.success === false) {
-        console.error('[ExamSimulation] Submission returned success: false', result)
         throw new Error(result?.error || 'Exam submission failed: Server returned error')
       }
 
       if (!result.session_id || !result.exam_name) {
-        console.error('[ExamSimulation] Invalid submission response - missing required fields:', {
-          hasSessionId: !!result.session_id,
-          hasExamName: !!result.exam_name,
-          result
-        })
         throw new Error('Exam submission failed: Missing required data in response')
       }
 
-      console.log('[ExamSimulation] Exam submitted successfully:', {
-        session_id: result.session_id,
-        score: result.score,
-        total_questions: result.total_questions,
-      })
-
       // Navigate to results page with data (only if submission succeeded)
-      console.log('[ExamSimulation] Navigating to results page...')
       navigate(`/exam/${session.exam.id}/results`, {
         state: {
           examResults: result,
@@ -644,23 +592,6 @@ export function ExamSimulation() {
         },
       })
     } catch (error: any) {
-      // Comprehensive error logging
-      console.error('[ExamSimulation] Failed to submit exam - Full error details:', {
-        error,
-        errorType: error?.constructor?.name,
-        message: error?.message,
-        stack: error?.stack,
-        status: error?.status,
-        statusCode: error?.statusCode,
-        code: error?.code,
-        context: error?.context,
-        originalError: error?.originalError,
-        sessionId: sessionId,
-        session: session?.session_id,
-        examId: session?.exam?.id,
-        sessionObject: session,
-      })
-      
       // Always reset submitting state on error
       setIsSubmitting(false)
       
@@ -673,7 +604,6 @@ export function ExamSimulation() {
         error?.error ||
         'Failed to submit exam. Please check your connection and try again.'
       
-      console.error('[ExamSimulation] Showing error alert to user:', errorMessage)
       alert(`Failed to submit exam: ${errorMessage}\n\nIf this problem persists, please contact support.`)
     }
   }
@@ -687,9 +617,7 @@ export function ExamSimulation() {
       // Save current time remaining before exiting
       try {
         await updateTimeMutation.mutateAsync(timeRemainingSec)
-        console.log('[ExamSimulation] Time saved successfully on exit:', timeRemainingSec)
       } catch (error) {
-        console.error('[ExamSimulation] Failed to save time remaining:', error)
         // Show error but still allow exit
         alert('Warning: Time remaining may not have been saved. Your answers are saved.')
       }
@@ -705,7 +633,6 @@ export function ExamSimulation() {
         // Navigate to exam landing page (ExamView component) - shows list of exams
         navigate(`/course/${courseId}/exam`, { replace: true })
       } else {
-        console.error('No course_id found in session, falling back to courses page')
         // Fallback: navigate to courses page
         navigate('/courses', { replace: true })
       }
@@ -720,13 +647,8 @@ export function ExamSimulation() {
       // Use current state value, not stale closure
       setTimeRemainingSec((current) => {
         if (current > 0 && !isSubmitting) {
-          console.log('[ExamSimulation] Periodic save - saving time:', current)
           updateTimeMutation.mutate(current, {
-            onSuccess: () => {
-              console.log('[ExamSimulation] Time saved successfully:', current)
-            },
-            onError: (error) => {
-              console.error('[ExamSimulation] Failed to save time remaining:', error)
+            onError: () => {
               // Retry once after 2 seconds
               setTimeout(() => {
                 setTimeRemainingSec((retryValue) => {
@@ -750,13 +672,11 @@ export function ExamSimulation() {
     try {
       const doc = sourceDocuments?.find(d => d && d.id === documentId)
       if (!doc) {
-        console.error('[ExamSimulation] Document not found:', documentId)
         return
       }
 
       const storagePath = doc.storage_path || doc.file_path || ''
       if (!storagePath) {
-        console.error('[ExamSimulation] No storage path for document:', documentId)
         return
       }
 
@@ -765,7 +685,6 @@ export function ExamSimulation() {
         .getPublicUrl(storagePath)
 
       if (!data?.publicUrl) {
-        console.error('[ExamSimulation] Failed to get public URL for document:', documentId)
         return
       }
 
@@ -776,7 +695,7 @@ export function ExamSimulation() {
       })
       setShowSourceMaterials(false)
     } catch (error) {
-      console.error('[ExamSimulation] Failed to open PDF:', error)
+      // Silent fail for PDF opening
     }
   }
 
@@ -1011,23 +930,36 @@ export function ExamSimulation() {
                 <div className="text-2xl mb-8 leading-relaxed">{currentQuestion.prompt}</div>
 
                 {/* Free Response Input */}
-                <textarea
-                  value={answers[currentQuestion.id] || ''}
-                  onChange={(e) => handleSelectAnswer(e.target.value)}
-                  placeholder="Type your answer here..."
-                  className="w-full min-h-[200px] p-4 border border-[#E5E7EB] rounded-[12px] text-lg resize-none focus:outline-none focus:border-[#4F46E5] transition-colors"
-                />
-
-                {/* Auto-save indicator */}
-                {saveAnswerMutation.isLoading && (
-                  <div className="text-sm text-[#6B7280] mt-2 flex items-center gap-2">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Saving...
+                <div className="space-y-2">
+                  <textarea
+                    value={answers[currentQuestion.id] || ''}
+                    onChange={(e) => handleSelectAnswer(e.target.value)}
+                    placeholder="Type your answer here... Be thorough and explain your reasoning."
+                    className="w-full min-h-[200px] p-4 border border-[#E5E7EB] rounded-[12px] text-lg resize-none focus:outline-none focus:border-[#4F46E5] transition-colors"
+                  />
+                  
+                  {/* Character count and guidance */}
+                  <div className="flex items-center justify-between text-sm text-[#6B7280]">
+                    <span>{(answers[currentQuestion.id] || '').length} characters</span>
+                    {(currentQuestion as any).frq_ideal_answer && (
+                      <span className="text-[#9CA3AF]">
+                        Expected: ~{Math.round(((currentQuestion as any).frq_ideal_answer.split(' ').length) * 0.8)}-
+                        {Math.round(((currentQuestion as any).frq_ideal_answer.split(' ').length) * 1.2)} words
+                      </span>
+                    )}
                   </div>
-                )}
-                {saveAnswerMutation.isSuccess && !saveAnswerMutation.isLoading && (
-                  <div className="text-sm text-[#10B981] mt-2">✓ Saved</div>
-                )}
+
+                  {/* Auto-save indicator */}
+                  {saveAnswerMutation.isLoading && (
+                    <div className="text-sm text-[#6B7280] flex items-center gap-2">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Saving...
+                    </div>
+                  )}
+                  {saveAnswerMutation.isSuccess && !saveAnswerMutation.isLoading && (
+                    <div className="text-sm text-[#10B981]">✓ Saved</div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1154,6 +1086,7 @@ export function ExamSimulation() {
         isOpen={showRelevantContent}
         onClose={() => setShowRelevantContent(false)}
         data={relevantContent}
+        question={currentQuestion}
         isLoading={relevantContentLoading}
         error={relevantContentError}
         courseName={session?.exam?.course_name || 'Course Materials'}
